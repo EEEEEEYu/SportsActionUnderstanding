@@ -31,10 +31,9 @@ loss: [CrossEntropyLoss]
 loss_weight: [1.0]
 weight_decay: 1e-6
 
-# Checkpoint & Restart Control
-
 # Tensorboard Logger Setting
-log_dir: ''
-log_dir_name: 'lightning_logs'
+log_dir: 'lightning_logs'
 experiment_name: 'main'
 
+# Checkpoint & Restart Control
+enable_checkpointing: True

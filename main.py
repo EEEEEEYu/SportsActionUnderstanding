@@ -83,8 +83,8 @@ def main(config):
     model_module = ModelInterface(**config)
 
     # Add the tensorboard logger
-    log_dir_name_with_time = os.path.join(config['log_dir_name'], datetime.datetime.now().strftime("%Y%m%d-%H-%M-%S"))
-    logger = TensorBoardLogger(save_dir=config['log_dir'], name=f"{log_dir_name_with_time}-{config['experiment_name']}")
+    log_dir_name_with_time = os.path.join(config['log_dir'], datetime.datetime.now().strftime("%Y%m%d-%H-%M-%S"))
+    logger = TensorBoardLogger(save_dir='.', name=f"{log_dir_name_with_time}-{config['experiment_name']}")
     config['logger'] = logger
 
     # Load callback functions for Trainer
@@ -106,17 +106,13 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--config_path', default=os.path.join(os.getcwd(), 'config', 'config.yaml'), type=str, required=False,
                         help='Path of config file')
-    parser.add_argument('--dataset_dir', default=os.path.join(os.getcwd(), 'dataset'), type=str, required=False,
-                        help='Directory of dataset')
+
     # Parse arguments(set attributes for sys.args using above arguments)
     args = parser.parse_args()
 
     # Validate config file and dataset directory
     if not os.path.exists(args.config_path):
         raise FileNotFoundError(f'No config file found at {args.config_path}!')
-
-    if not os.path.exists(args.dataset_dir):
-        raise FileNotFoundError(f'No dataset directory found at {args.dataset_dir}')
 
     # Load .yaml config file as python dict
     with open(args.config_path) as f:
