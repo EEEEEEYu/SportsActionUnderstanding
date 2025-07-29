@@ -17,6 +17,8 @@ import torch
 import importlib
 import torch.optim.lr_scheduler as lrs
 import pytorch_lightning as pl
+
+from loss.loss_funcs import cross_entropy_loss
 from typing import Callable, Dict, Tuple
 
 
@@ -114,27 +116,10 @@ class ModelInterface(pl.LightningModule):
         return sum(weighted_loss)
 
     def __configure_loss(self):
-        # Params defined loss function list
-        config_loss_funcs = [getattr(importlib.import_module('torch.nn'), name)() for name in
-                             self.hparams.loss]
-        config_loss_weight = self.hparams.loss_weight
-        config_loss_names = self.hparams.loss
-
-        assert (len(config_loss_funcs) == len(config_loss_weight)
-                and len(config_loss_funcs) == len(
-                    config_loss_names)), "Loss function num and weight/names num mismatch!"
-
-        config_loss_dict = dict(
-            [(loss_name, (loss_weight, loss_func))
-             for loss_name, loss_weight, loss_func in zip(config_loss_names, config_loss_weight, config_loss_funcs)]
-        )
-
         # User-defined function list. Recommend using `_loss` suffix in loss names.
-        user_loss_dict = {
-
+        loss_dict = {
+            'cross_entropy_loss': (1.0, cross_entropy_loss),
         }
-
-        loss_dict = {**config_loss_dict, **user_loss_dict}
 
         def loss_func(inputs, labels, stage):
             return self.__calculate_loss_and_log(
@@ -153,7 +138,7 @@ class ModelInterface(pl.LightningModule):
         # model class name as corresponding `CamelCase`.
         camel_name = ''.join([i.capitalize() for i in name.split('_')])
         try:
-            model_class = getattr(importlib.import_module('.' + name, package=__package__), camel_name)
+            model_class = getattr(importlib.import_module('model.' + name, package=__package__), camel_name)
         except Exception:
             raise ValueError(f'Invalid Module File Name or Invalid Class Name {name}.{camel_name}!')
         model = self.__instantiate(model_class)

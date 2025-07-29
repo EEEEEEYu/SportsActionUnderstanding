@@ -24,8 +24,8 @@ from argparse import ArgumentParser
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from model import ModelInterface
-from data import DataInterface
+from model_interface import ModelInterface
+from data_interface import DataInterface
 
 
 # For all built-in callback functions, see: https://lightning.ai/docs/pytorch/stable/api_references.html#callbacks
@@ -34,7 +34,7 @@ def load_callbacks(config):
     callbacks = []
     # Monitor a metric and stop training when it stops improving
     callbacks.append(plc.EarlyStopping(
-        monitor='val_acc',
+        monitor='val_loss',
         mode='max',
         patience=10,
         min_delta=0.001
@@ -45,9 +45,9 @@ def load_callbacks(config):
         # Best checkpoint
         callbacks.append(plc.ModelCheckpoint(
             every_n_epochs=1,
-            monitor='val_acc',
+            monitor='val_loss',
             mode='max',
-            filename='best-{epoch:03d}-{val_acc:.5f}',
+            filename='best-{epoch:03d}-{val_loss:.5f}',
             save_top_k=1,
             save_last=False,
         ))
@@ -55,7 +55,7 @@ def load_callbacks(config):
         # Epoch checkpoint. Store the model of latest epoch
         callbacks.append(plc.ModelCheckpoint(
             every_n_epochs=1,
-            filename='latest-{epoch:03d}-{val_acc:.5f}',
+            filename='latest-{epoch:03d}-{val_loss:.5f}',
             monitor=None,
         ))
 
@@ -85,15 +85,15 @@ def load_callbacks(config):
 
 def get_checkpoint_path(config):
     # Check if resuming from a manual checkpoint or last checkpoint
-    resume_from_manual_checkpoint = config.get('resume_from_manual_checkpoint', None)
+    load_manual_checkpoint = config.get('load_manual_checkpoint', None)
     resume_from_last_checkpoint = config.get('resume_from_last_checkpoint', None)
     checkpoint_directory = None
     checkpoint_file_path = None
 
-    if resume_from_manual_checkpoint:
+    if load_manual_checkpoint:
         # After truncating the path, PL will automatically append a new version under the parent folder(which has format: {timestamp}-{experiment name})
-        checkpoint_file_path = resume_from_manual_checkpoint
-        truncated_path = resume_from_manual_checkpoint
+        checkpoint_file_path = load_manual_checkpoint
+        truncated_path = load_manual_checkpoint
         for i in range(2):
             truncated_path = truncated_path[:truncated_path.rfind(os.path.sep)]
         # Use the same logging directory as the checkpoint
@@ -169,9 +169,9 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--config_path', default=os.path.join(os.getcwd(), 'config', 'config.yaml'), type=str, required=False,
                         help='Path of config file')
-    parser.add_argument('--resume_from_last_checkpoint', default=None, type=bool, required=False, 
+    parser.add_argument('--resume_from_last_checkpoint', action='store_true',
                     help='Automatically find the log folder with latest timestamp and latest version, and load `latest-...`.ckpt model')
-    parser.add_argument('--resume_from_manual_checkpoint', default=None, type=str, required=False,
+    parser.add_argument('--load_manual_checkpoint', default=None, type=str, required=False,
                     help='Manually designate the path to a checkpoint file(.ckpt) to resume training from.')
 
     # Parse arguments(set attributes for sys.args using above arguments)
@@ -186,7 +186,7 @@ if __name__ == '__main__':
         config_dict = yaml.safe_load(f)
 
     # Convert config dict keys to lowercase
-    config_dict['resume_from_manual_checkpoint'] = args.resume_from_manual_checkpoint
+    config_dict['load_manual_checkpoint'] = args.load_manual_checkpoint
     config_dict['resume_from_last_checkpoint'] = args.resume_from_last_checkpoint
     config_dict = dict([(k.lower(), v) for k, v in config_dict.items()])
 
