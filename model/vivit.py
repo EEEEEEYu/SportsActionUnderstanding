@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
-from transformers import ViViTForVideoClassification, ViViTConfig, ViViTModel
+from transformers import VivitModel, VivitConfig
 
 class FrameWiseViViT(nn.Module):
     def __init__(self, num_classes, pretrained_model_name="google/vivit-base"):
         super().__init__()
         # Load self‑attention backbone (no final pooling)
-        config = ViViTConfig.from_pretrained(pretrained_model_name)
-        self.backbone = ViViTModel.from_pretrained(pretrained_model_name, config=config)
+        config = VivitConfig.from_pretrained(pretrained_model_name)
+        self.backbone = VivitModel.from_pretrained(pretrained_model_name, config=config)
         hidden = config.hidden_size
         self.cls_head = nn.Linear(hidden, num_classes)
 

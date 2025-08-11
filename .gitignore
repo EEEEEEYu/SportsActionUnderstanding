@@ -2,6 +2,7 @@
 /lightning_logs
 /venv
 *.DS_Store
+/ActionData
 
 # The following lines are from the github Python.gitignore template
 # Reference link: https://github.com/github/gitignore/blob/main/Python.gitignore
