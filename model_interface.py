@@ -34,7 +34,7 @@ class ModelInterface(pl.LightningModule):
 
     # Caution: self.model.train() is invoked
     def training_step(self, batch, batch_idx):
-        train_input, train_labels = batch
+        train_input, valid_len, train_labels = batch
         train_out = self(train_input)
         train_loss = self.loss_function(train_out, train_labels, 'train')
 
@@ -49,7 +49,7 @@ class ModelInterface(pl.LightningModule):
 
     # Caution: self.model.eval() is invoked and this function executes within a <with torch.no_grad()> context
     def validation_step(self, batch, batch_idx):
-        val_input, val_labels = batch
+        val_input, valid_len, val_labels = batch
         val_out = self(val_input)
         val_loss = self.loss_function(val_out, val_labels, 'validation')
 
@@ -65,7 +65,7 @@ class ModelInterface(pl.LightningModule):
     # Caution: self.model.eval() is invoked and this function executes within a <with torch.no_grad()> context
     def test_step(self, batch, batch_idx):
         # Same with validation_step except for the log verbose info
-        test_input, test_labels = batch
+        test_input, valid_len, test_labels = batch
         test_out = self(test_input)
         test_loss = self.loss_function(test_out, test_labels, 'test')
 

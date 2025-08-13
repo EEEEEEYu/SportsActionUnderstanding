@@ -65,8 +65,19 @@ class DecoderBlock(nn.Module):
     def forward(self, x):
         return self.block(x)
 
-class EncoderConvLSTMDecoder(nn.Module):
-    def __init__(self, height, width, num_classes, in_channels, embedding_dim, hidden_channels, lstm_kernel, num_lstm_layers=1, norm_type='instance'):
+class ConvLstm(nn.Module):
+    def __init__(
+            self, 
+            height, 
+            width, 
+            num_classes, 
+            in_channels, 
+            embedding_dim, 
+            hidden_channels, 
+            lstm_kernel=(3, 3), 
+            num_lstm_layers=1, 
+            norm_type='instance'
+        ):
         super().__init__()
         self.height = height
         self.width = width
@@ -166,7 +177,7 @@ class EncoderConvLSTMDecoder(nn.Module):
 
 def main():
     B, T, C, H, W = 1, 13, 10, 640, 480
-    model = EncoderConvLSTMDecoder(
+    model = Convlstm(
         height=640,
         width=480,
         num_classes=10,

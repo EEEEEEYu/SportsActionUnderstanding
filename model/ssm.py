@@ -100,7 +100,7 @@ class ConvSsm(nn.Module):
 
         return out
     
-
+"""
 class ResidualBlock(nn.Module):
     def __init__(self, d):
         super().__init__()
@@ -186,9 +186,10 @@ class VectorSsm(nn.Module):
         out = self.classification_head(out)             # (B, L, num_classes)
 
         return out
+"""
     
 
-class Ssm(nn.Module):
+"""class Ssm(nn.Module):
     def __init__(
             self,
             num_classes, 
@@ -230,7 +231,7 @@ class Ssm(nn.Module):
         return self.net(x)
     
     def reset_state(self):
-        self.net.reset_state()
+        self.net.reset_state()"""
 
 def main():
     B, L, C, H, W = 2, 5, 3, 640, 480

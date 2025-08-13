@@ -25,6 +25,7 @@ class DataInterface(pl.LightningDataModule):
         super().__init__()
         # This save_hyperparameter() method moves arguments to self.hparams, which are used for automatic logging
         self.save_hyperparameters()
+        self.data_class = None
         self.train_set, self.validation_set, self.test_set = self.__load_data_module()
 
     # Lightning hook function, override to implement loading train dataset
@@ -34,7 +35,8 @@ class DataInterface(pl.LightningDataModule):
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             shuffle=True,
-            persistent_workers=self.hparams.persistent_workers
+            persistent_workers=self.hparams.persistent_workers,
+            collate_fn=self.data_class.collate_fn
         )
 
     # Lightning hook function, override to implement loading validation dataset
@@ -44,7 +46,8 @@ class DataInterface(pl.LightningDataModule):
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             shuffle=False,
-            persistent_workers=self.hparams.persistent_workers
+            persistent_workers=self.hparams.persistent_workers,
+            collate_fn=self.data_class.collate_fn
         )
 
     # Lightning hook function, override to implement loading test dataset
@@ -54,7 +57,8 @@ class DataInterface(pl.LightningDataModule):
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
             shuffle=False,
-            persistent_workers=self.hparams.persistent_workers
+            persistent_workers=self.hparams.persistent_workers,
+            collate_fn=self.data_class.collate_fn
         )
 
     # Lightning hook function. Implement as needed.
@@ -71,6 +75,8 @@ class DataInterface(pl.LightningDataModule):
             data_class = getattr(importlib.import_module('data.' + name, package=__package__), camel_name)
         except Exception:
             raise ValueError(f'Invalid Dataset File Name or Invalid Class Name data.{name}.{camel_name}')
+        
+        self.data_class = data_class
 
         return self.__instantiate(data_class=data_class, purpose='train'), self.__instantiate(data_class=data_class, purpose='validation'), self.__instantiate(data_class=data_class, purpose='test')
 
