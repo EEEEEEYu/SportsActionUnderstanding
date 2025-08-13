@@ -79,6 +79,8 @@ def get_frame_between(all_frames, all_ts, start_time, end_time):
     # there can be multiple frames that overlap the time window,
     # want the frame that is closest to the start of the time window
     start_idx = binary_search_time(all_ts, start_time)
+    if start_idx > len(all_frames) - 1:
+        start_idx = len(all_frames) - 1
     return all_frames[start_idx]
 
 
