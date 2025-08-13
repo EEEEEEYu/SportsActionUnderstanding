@@ -25,7 +25,6 @@ def view_processed_data(sequence_path, window_size_ms=100):
     start_timestamp = flir_t[0]
     end_timestamp = flir_t[-1]
     current_time = flir_t[0]
-    current_flir_idx = 0
     playing = False
 
     print("START", start_timestamp, "END", end_timestamp, events_t[0], events_t[-1])
@@ -44,8 +43,8 @@ def view_processed_data(sequence_path, window_size_ms=100):
         # undistort the event_frame
         event_frame = utils.undistort_event_count_image(event_frame, events_K, events_dist, events_res)
 
-        # Get flir frame
-        flir_frame = frames[current_flir_idx]
+        # get flir frame
+        flir_frame = utils.get_frame_between(frames, flir_t, window_start, window_end)
         
         # --- Create visualizations ---
         # Create an overlay by blending the two images
@@ -57,7 +56,6 @@ def view_processed_data(sequence_path, window_size_ms=100):
         # --- Display the images ---
         # Add text to show timing information
         time_info = f"Time: {(current_time - start_timestamp) / 1e6:.3f}s | "
-        time_info += f"FLIR Frame: {current_flir_idx + 1}/{num_frames} | "
         time_info += f"Events: {len(events_in_window)} | "
         time_info += f"{'Playing' if playing else 'Paused'}"
         
@@ -75,9 +73,6 @@ def view_processed_data(sequence_path, window_size_ms=100):
                 current_time += window_size_us
                 if current_time > end_timestamp:
                     current_time = start_timestamp  # Loop back to beginning
-                    current_flir_idx = 0
-                while current_flir_idx < num_frames - 1 and current_time >= flir_t[current_flir_idx + 1]:
-                    current_flir_idx += 1
             
         else:
             key = cv2.waitKey(0) & 0xFF  # Wait indefinitely when paused
@@ -86,36 +81,25 @@ def view_processed_data(sequence_path, window_size_ms=100):
             break
         elif key == ord('n'):  # Next window
             old_time = current_time
+            # increment current_time
             current_time = min(current_time + window_size_us, end_timestamp)
-            # increment current_flir_idx
-            while current_flir_idx < num_frames - 1 and current_time >= flir_t[current_flir_idx + 1]:
-                if current_time > end_timestamp:
-                    current_time = start_timestamp  # Loop back to beginning
-                    current_flir_idx = 0
-                else:
-                    current_flir_idx += 1
+            if current_time > end_timestamp:
+                current_time = start_timestamp  # Loop back to beginning
             print(f"[TIME] Advanced from {old_time:.2f} to {current_time:.2f} us ({(current_time-old_time)/1000:.1f} ms forward)")
         elif key == ord('p'):  # Previous window
             old_time = current_time
+            # decrement current_time
             current_time = max(current_time - window_size_us, start_timestamp)
-            # decrement current_flir_idx
-            while current_flir_idx > 0 and current_time < flir_t[current_flir_idx]:
-                if current_time < start_timestamp:
-                    current_time = end_timestamp  # Loop back to end
-                    current_flir_idx = num_frames - 1
-                else:
-                    current_flir_idx -= 1
+            if current_time < start_timestamp:
+                current_time = end_timestamp  # Loop back to end
             print(f"[TIME] Moved back from {old_time:.2f} to {current_time:.2f} us ({(old_time-current_time)/1000:.1f} ms backward)")
         elif key == ord(' '):  # Space bar for play/pause
             playing = not playing
             print(f"[PLAYBACK] {'Playing' if playing else 'Paused'}")
         elif key == ord('r'):  # Reset to beginning
             print(f"[RESET] Resetting to overlap start time {start_timestamp:.2f} us")
+            # reset current_time
             current_time = start_timestamp
-            # Find the correct FLIR frame for the start time
-            current_flir_idx = 0
-            while current_flir_idx < num_frames - 1 and start_timestamp >= flir_t[current_flir_idx + 1]:
-                current_flir_idx += 1
 
     cv2.destroyAllWindows()
     print("Viewer closed.")

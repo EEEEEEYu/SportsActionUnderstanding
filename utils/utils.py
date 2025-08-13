@@ -75,6 +75,13 @@ def get_events_between(all_events, all_ts, start_time, end_time):
     return all_events[start_idx:end_idx, ...]
 
 
+def get_frame_between(all_frames, all_ts, start_time, end_time):
+    # there can be multiple frames that overlap the time window,
+    # want the frame that is closest to the start of the time window
+    start_idx = binary_search_time(all_ts, start_time)
+    return all_frames[start_idx]
+
+
 @jit(nopython=True)
 def event_count_image(image, x, y, p):
     image[...] = 0

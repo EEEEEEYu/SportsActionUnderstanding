@@ -1,8 +1,3 @@
-# TODO: write validations at the end of processing each event stream
-# TODO: re-run the event processing and reupload the data
-# TODO: write simple functions for event undistortion and event matrix remapping
-# TODO: and alignment with the RGB images
-
 # https://github.com/uzh-rpg/DSEC/issues/14#issuecomment-841348958
 
 import os
