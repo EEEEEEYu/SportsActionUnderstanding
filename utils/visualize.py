@@ -1,66 +1,23 @@
 import argparse
-import glob
 import os
 import cv2
 import numpy as np
 
-from utils import render, get_events_between
+import utils
 
 
-def view_processed_data(sequence_path, window_size_ms=100, time_offset_ms=0):
-    """
-    Loads and displays processed FLIR and event data from a sequence directory.
-
-    Args:
-        sequence_path (str): The path to the main sequence directory which
-                             contains the 'proc_flir' and 'proc_events' subfolders.
-        window_size_ms (int): Time window size in milliseconds for event accumulation.
-        time_offset_ms (float): Manual time offset in milliseconds to adjust event timing relative to FLIR.
-                                Positive values delay events, negative values advance events.
-    """
-    # --- 1. Define paths and find data files ---
-    flir_dir = os.path.join(sequence_path, 'proc', 'flir')
-    if not os.path.isdir(flir_dir):
-        print(f"Error: Could not find 'proc/flir' directory in '{sequence_path}'")
-        print("Please run the processing script first.")
-        return
-    # Get a sorted list of the processed FLIR frames
-    # Check for both NPY and PNG files
-    flir_files_png = sorted(glob.glob(os.path.join(flir_dir, '*.png')))
-        
-    # Use PNG files if available, otherwise NPY
-    if flir_files_png:
-        flir_files = flir_files_png
-    
-    if not flir_files:
-        print(f"Error: No FLIR frame files found in '{flir_dir}'")
-        return
-        
-    flir_t = np.load(os.path.join(flir_dir, 't.npy'))
-
-    # load flir files
-    flir_frames = []
-    for f in flir_files:
-        # Load PNG file
-        frame = cv2.imread(f, cv2.IMREAD_UNCHANGED)
-        if frame is None:
-            print(f"Warning: Could not load PNG file {f}")
-            continue
-        flir_frames.append(frame)
-    num_frames = len(flir_frames)
-
+def view_processed_data(sequence_path, window_size_ms=100):
+    # load frames
+    frames, flir_t, flir_res, flir_K, flir_dist = utils.load_frames(sequence_path)
+    num_frames = len(frames)
+    print(f"Loaded {num_frames} FLIR frames")
     # load events
-    events_xy = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_xy.npy')).astype(np.uint16)
-    events_t  = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_t.npy'))
-    events_p  = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_p.npy'))
-    print(events_xy.dtype, events_t.dtype, events_p.dtype)
-    print(np.min(events_xy, axis=0), np.max(events_xy, axis=0))
-
-    all_events = np.concatenate([events_xy, events_t[..., np.newaxis], events_p[..., np.newaxis]], axis=-1)
+    events, events_t, events_res, events_K, events_dist = utils.load_events(sequence_path)
+    #events = utils.undistort_events_backward(events, events_K, events_dist, events_res)
 
     print(f"Controls: 'n' for next window, 'p' for previous window, 'space' for play/pause, 'q' to quit, 'r' to reset")
-    print(f"Window size: {window_size_ms}ms, Time offset: {time_offset_ms}ms")
-    
+    print(f"Window size: {window_size_ms}ms")
+
     # Convert window size from ms to microseconds (assuming timestamps are in microseconds)
     window_size_us = window_size_ms * 1000
     
@@ -69,34 +26,26 @@ def view_processed_data(sequence_path, window_size_ms=100, time_offset_ms=0):
     end_timestamp = flir_t[-1]
     current_time = flir_t[0]
     current_flir_idx = 0
-    previous_flir_idx = -1
     playing = False
 
     print("START", start_timestamp, "END", end_timestamp, events_t[0], events_t[-1])
 
-    # Debug: Print FLIR frame timestamps
-    print(f"\nFLIR frame timestamps (first 10):")
-    for i in range(min(10, len(flir_t))):
-        print(f"  Frame {i}: {flir_t[i]:.2f} us ({flir_t[i]/1e6:.6f} s)")
-
-    # --- 2. Main display loop ---
     while True:
         # Calculate the time window
         window_start = current_time
         window_end = current_time + window_size_us
         
         # Get events in the current time window
-        events_in_window = get_events_between(all_events, events_t, window_start, window_end)
+        events_in_window = utils.get_events_between(events, events_t, window_start, window_end)
         print(f"Events in window ({window_start} - {window_end}): {len(events_in_window)}")
 
-        # Get flir frame
-        flir_frame = flir_frames[current_flir_idx]
-        flir_height, flir_width = flir_frame.shape[:2]
+        # create event frame
+        event_frame = utils.render(events_in_window, events_res)
+        # undistort the event_frame
+        event_frame = utils.undistort_event_count_image(event_frame, events_K, events_dist, events_res)
 
-        # Create event frame with same dimensions as FLIR frame
-        event_frame = np.zeros((flir_height, flir_width, 3), dtype=np.uint8)
-        if len(events_in_window) > 0:
-            event_frame = render(events_in_window, event_frame)
+        # Get flir frame
+        flir_frame = frames[current_flir_idx]
         
         # --- Create visualizations ---
         # Create an overlay by blending the two images
@@ -187,15 +136,9 @@ if __name__ == "__main__":
         default=100,
         help="Time window size in milliseconds for event accumulation (default: 100ms)"
     )
-    parser.add_argument(
-        "--time_offset",
-        type=float,
-        default=0,
-        help="Time offset in milliseconds to adjust event timing relative to FLIR (default: 0ms). Positive delays events, negative advances events."
-    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.sequence_path):
         print(f"Error: The provided path is not a valid directory: {args.sequence_path}")
     else:
-        view_processed_data(args.sequence_path, window_size_ms=args.window_size, time_offset_ms=args.time_offset)
+        view_processed_data(args.sequence_path, window_size_ms=args.window_size)
