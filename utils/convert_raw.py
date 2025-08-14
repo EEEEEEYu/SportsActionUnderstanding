@@ -1,5 +1,3 @@
-# https://github.com/uzh-rpg/DSEC/issues/14#issuecomment-841348958
-
 import os
 import sys
 import cv2
@@ -9,14 +7,12 @@ import json
 import numpy as np
 import tqdm
 import argparse
-import multiprocessing
 from multiprocessing import Value
 from numba import jit
 
 from vme_research.messaging.shared_ndarray import SharedNDArrayPipe
 from vme_research.hardware.prophesee_camera import PropheseeCamera
 from vme_research.hardware.record import Record, Load
-
 
 # Attempt to import the necessary custom library from your environment
 try:
@@ -28,10 +24,14 @@ except ImportError as e:
     class Load: pass
     class LoadEventStream: pass
 
+
 # --- Constants and Configuration ---
 FLIR_DIR = 'flir_23604512'
 PROPH_DIR = 'proph_00051463'
 PROPH_EXP_DIR = 'proph_00051463_exported'
+PROPH_RES = (1280, 720)  # Prophesee resolution
+CROP_ROI = (290, 0, 1010, 720)  # ROI for cropped coordinates
+CROP_RES = (720, 720)
 
 
 class TimeZeroSource:
@@ -78,7 +78,7 @@ def convert_raw_to_npy(cam_folder):
 
             data = e_pubsub.get(N=-1)
             if data is not None:
-                image = np.full((720, 1280), 0.5, dtype=np.float32)
+                image = np.full([PROPH_RES[1], PROPH_RES[0]], 0.5, dtype=np.float32)
                 no_data_count = 0
 
                 et, ex, ey, ep = data
@@ -86,8 +86,8 @@ def convert_raw_to_npy(cam_folder):
                 ex = ex.flatten()
                 ey = ey.flatten()
                 ep = ep.flatten()
-                
-                ex = (1280 - 1) - ex
+
+                ex = (PROPH_RES[0] - 1) - ex
 
                 image = events_image(image, ex, ey, ep)
 
@@ -130,7 +130,7 @@ def get_calibration_parameters(calib_path, crop):
     dist_proph = np.array(calib_data_proph['dist'])
     R_vc_c_proph = np.array(calib_data_proph['R_vc_c']).reshape(3, 3)
 
-    res_proph = (720, 720) if crop else (1280, 720)
+    res_proph = CROP_RES if crop else PROPH_RES
     R_proph_flir = R_vc_c_proph.T @ R_vc_c_flir
 
     # Create map to warp FLIR image to (undistorted) Prophesee coordinates
@@ -145,7 +145,7 @@ class AlignedDataSaver:
         self.seq_path = seq_path
         self.calib_path = calib_path
         self.crop = crop
-        self.crop_roi = (0, 0, 720, 720) if self.crop else None # ROI for cropped coordinates
+        self.crop_roi = (0, 0, CROP_RES[0], CROP_RES[1]) if self.crop else None # ROI for cropped coordinates
 
         self.flir_camera_dir = os.path.join(self.seq_path, FLIR_DIR)
         self.proph_events_dir = os.path.join(self.seq_path, PROPH_EXP_DIR)
@@ -196,16 +196,16 @@ class AlignedDataSaver:
         # TODO: maybe we can avoid using the vme driver for raw to npy conversion
         #       and just use metavision_sdk directly
         # TODO: move the cropping ROI information to one place
-        event_xy[:, 0] = (1280 - 1) - event_xy[:, 0]
+        event_xy[:, 0] = (PROPH_RES[0] - 1) - event_xy[:, 0]
         if self.crop:
-            roi = (290,0,1010,720)
+            roi = CROP_ROI
             event_xy = event_xy.astype(np.int32)
             event_xy[:, 0] = np.maximum(event_xy[:, 0] - roi[0], 0)
             event_xy[:, 1] = np.maximum(event_xy[:, 1] - roi[1], 0)
             event_xy = event_xy.astype(np.uint16)
             # update resolution in data.json file
-            event_data["append_fields"]["res"] = [720, 720]
-            flir_data["append_fields"]["res"] = [720, 720]
+            event_data["append_fields"]["res"] = list(CROP_RES)
+            flir_data["append_fields"]["res"] = list(CROP_RES)
 
         # save the events_xy, events_t, events_p to separate numpy files
         np.save(os.path.join(self.output_events_dir, "events_xy.npy"), event_xy)
@@ -299,11 +299,11 @@ def process_sequence(sequence, calib, beamsplitter, only_validate=False):
         return
     
     # only convert if the "proph_00051463_exported" does not exist
-    if not os.path.exists(os.path.join(sequence, "proph_00051463_exported")):
+    if not os.path.exists(os.path.join(sequence, PROPH_EXP_DIR)):
         print('Converting', sequence)
         convert_raw_to_npy(os.path.join(sequence, PROPH_DIR))
     else:
-        print('Skipping conversion, already exists:', os.path.join(sequence, "proph_00051463_exported"))
+        print('Skipping conversion, already exists:', os.path.join(sequence, PROPH_EXP_DIR))
 
     # align the data and save it out
     AlignedDataSaver(

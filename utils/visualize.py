@@ -14,10 +14,10 @@ def view_processed_data(sequence_path, window_size_ms=100):
     # load events
     events, events_t, events_res, events_K, events_dist = utils.load_events(sequence_path)
 
-    # To do the forward mapping
-    events = utils.undistort_event_xy_forward(events, events_K, events_dist, round=True, res=events_res)
+    # FORWARD POINT MAPPING
+    #events = utils.undistort_events_forward(events, events_K, events_dist, round=True, res=events_res)
 
-    # To do the backward mapping
+    # BACKWARD POINT MAPPING
     #events = utils.undistort_events_backward(events, events_K, events_dist, events_res)
 
     print(f"Controls: 'n' for next window, 'p' for previous window, 'space' for play/pause, 'q' to quit, 'r' to reset")
@@ -46,8 +46,8 @@ def view_processed_data(sequence_path, window_size_ms=100):
         # create event frame
         event_frame = utils.render(events_in_window, events_res)
         
-        # To do backward mapping of the event image with interpolation
-        #event_frame = utils.undistort_event_count_image(event_frame, events_K, events_dist, events_res)
+        # BACKWARD IMAGE MAPPING
+        event_frame = utils.undistort_event_count_image(event_frame, events_K, events_dist, events_res)
 
         # get flir frame
         flir_frame = utils.get_frame_between(frames, flir_t, window_start, window_end)

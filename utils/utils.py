@@ -8,6 +8,9 @@ from numba import jit
 from scipy.spatial import cKDTree
 
 
+CROP_RES = (720, 720)
+
+
 def load_events(sequence_path):
     # load events
     events_xy = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_xy.npy')).astype(np.uint16)
@@ -92,13 +95,14 @@ def event_count_image(image, x, y, p):
     return image
 
 
-def undistort_event_count_image(event_count_image, K, dist, res=(720,720)):
+# for more about the challenges with warping event points, see this issue here:
+# https://github.com/uzh-rpg/DSEC/issues/14#issuecomment-841348958
+def undistort_event_count_image(event_count_image, K, dist, res=CROP_RES):
     h, w = res
     map1, map2 = cv2.initUndistortRectifyMap(K, dist, None, K, (w, h), cv2.CV_32FC1)
     return cv2.remap(event_count_image, map1, map2, cv2.INTER_LINEAR)
 
-
-def undistort_event_xy_forward(events, K, dist, round=False, res=(720,720)):
+def undistort_events_forward(events, K, dist, round=False, res=CROP_RES):
     # Format points for OpenCV function: (N, 1, 2)
     points_to_undistort = np.stack((events[:, 0], events[:, 1]), axis=-1).astype(np.float32)[:, np.newaxis, :]
     # Undistort points. The new camera matrix P=K gives pixel coordinates.
@@ -112,8 +116,7 @@ def undistort_event_xy_forward(events, K, dist, round=False, res=(720,720)):
     events[:, :2] = rectified_coords
     return events
 
-
-def undistort_events_backward(events, K, dist, res=(720,720)):
+def undistort_events_backward(events, K, dist, res=CROP_RES):
     # h, w: Sensor height and width (e.g., 720, 720)
     h, w = res
 
