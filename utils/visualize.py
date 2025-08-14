@@ -13,6 +13,11 @@ def view_processed_data(sequence_path, window_size_ms=100):
     print(f"Loaded {num_frames} FLIR frames")
     # load events
     events, events_t, events_res, events_K, events_dist = utils.load_events(sequence_path)
+
+    # To do the forward mapping
+    events = utils.undistort_event_xy_forward(events, events_K, events_dist, round=True, res=events_res)
+
+    # To do the backward mapping
     #events = utils.undistort_events_backward(events, events_K, events_dist, events_res)
 
     print(f"Controls: 'n' for next window, 'p' for previous window, 'space' for play/pause, 'q' to quit, 'r' to reset")
@@ -40,8 +45,9 @@ def view_processed_data(sequence_path, window_size_ms=100):
 
         # create event frame
         event_frame = utils.render(events_in_window, events_res)
-        # undistort the event_frame
-        event_frame = utils.undistort_event_count_image(event_frame, events_K, events_dist, events_res)
+        
+        # To do backward mapping of the event image with interpolation
+        #event_frame = utils.undistort_event_count_image(event_frame, events_K, events_dist, events_res)
 
         # get flir frame
         flir_frame = utils.get_frame_between(frames, flir_t, window_start, window_end)
@@ -110,7 +116,7 @@ if __name__ == "__main__":
         description="Visualize processed and aligned FLIR and event camera data."
     )
     parser.add_argument(
-        "sequence_path",
+        "--sequence",
         type=str,
         help="Path to the sequence directory containing 'proc/flir' and 'proc/events' folders."
     )
@@ -122,7 +128,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if not os.path.isdir(args.sequence_path):
-        print(f"Error: The provided path is not a valid directory: {args.sequence_path}")
+    if not os.path.isdir(args.sequence):
+        print(f"Error: The provided path is not a valid directory: {args.sequence}")
     else:
-        view_processed_data(args.sequence_path, window_size_ms=args.window_size)
+        view_processed_data(args.sequence, window_size_ms=args.window_size)

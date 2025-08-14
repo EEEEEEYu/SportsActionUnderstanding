@@ -98,8 +98,19 @@ def undistort_event_count_image(event_count_image, K, dist, res=(720,720)):
     return cv2.remap(event_count_image, map1, map2, cv2.INTER_LINEAR)
 
 
-def undistort_event_xy_forward(event_xy, K, dist, res=(720,720)):
-    pass
+def undistort_event_xy_forward(events, K, dist, round=False, res=(720,720)):
+    # Format points for OpenCV function: (N, 1, 2)
+    points_to_undistort = np.stack((events[:, 0], events[:, 1]), axis=-1).astype(np.float32)[:, np.newaxis, :]
+    # Undistort points. The new camera matrix P=K gives pixel coordinates.
+    rectified_points = cv2.undistortPoints(points_to_undistort, K, dist, P=K)
+    # Reshape back to (N, 2)
+    rectified_coords = rectified_points.reshape(-1, 2)
+    # Round to closest int if desired
+    if round:
+        rectified_coords = np.round(rectified_coords).astype(np.uint16)
+    # Set the undistorted coordinates back to the events
+    events[:, :2] = rectified_coords
+    return events
 
 
 def undistort_events_backward(events, K, dist, res=(720,720)):
