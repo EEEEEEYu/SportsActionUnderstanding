@@ -10,7 +10,7 @@ class Preprocessor(Dataset):
         self.accumulation_interval_ms = accumulation_interval_ms
 
         if not os.path.exists(dataset_dir):
-            raise FileNotFoundError("")
+            raise FileNotFoundError(f"Dataset directory not found at {dataset_dir}")
         self.sequence_list = os.listdir(dataset_dir)
     
     def __len__(self):
@@ -50,7 +50,7 @@ class Preprocessor(Dataset):
         events_xy_sliced = []
 
         # slicing by accumulation interval
-        interval_us = self.accumulation_interval_ms * 1000
+        interval_us = self.accumulation_interval_ms * 1000.0
         t_start = events_t_all[0]
         t_end   = events_t_all[-1]
 
