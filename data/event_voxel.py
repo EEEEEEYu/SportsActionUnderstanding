@@ -20,6 +20,8 @@ def normalize_array(voxel_grid, normalize):
         min_val = voxel_grid.min()
         max_val = voxel_grid.max()
         voxel_grid = (voxel_grid - min_val) / (max_val - min_val + eps)
+    elif normalize == 'None':
+        pass
     else:
         raise ValueError(f"Unknown normalization method: {normalize}")
     
@@ -124,14 +126,15 @@ def create_voxel_grid_with_index(source_H, source_W, target_H, target_W, num_bin
 class EventVoxel(data.Dataset):
     def __init__(
             self, 
-            dataset_dir,
-            height,
-            width,
-            num_bins,
-            use_polarity,
-            use_cache,
-            cache_root,
-            purpose
+            dataset_dir: str,
+            height: int,
+            width: int,
+            num_bins: int,
+            use_polarity: bool,
+            use_cache: bool,
+            cache_root: str,
+            purpose: str,
+            downsample_ratio: float
         ):
         self.dataset_dir = dataset_dir
         self.preprocessor = Preprocessor(dataset_dir=dataset_dir)
@@ -142,13 +145,13 @@ class EventVoxel(data.Dataset):
         self.use_cache = use_cache
         self.cache_root = cache_root
         self.purpose = purpose
+        self.downsample_ratio = downsample_ratio
 
     @staticmethod
     def collate_fn(batch):
         sequences, labels = zip(*batch)
         valid_len = torch.tensor([seq.shape[0] for seq in sequences], dtype=torch.long)
         padded_sequences = pad_sequence(sequences, batch_first=True)
-        print(type(padded_sequences), type(valid_len), type(labels))
         return padded_sequences, valid_len, torch.stack(labels)
 
     def __len__(self):
@@ -190,31 +193,32 @@ class EventVoxel(data.Dataset):
                 voxel_grid_pos, _ = create_voxel_grid_with_index(
                     source_H=self.height,
                     source_W=self.width,
-                    target_H=self.height,
-                    target_W=self.width,
+                    target_H=int(self.height // self.downsample_ratio),
+                    target_W=int(self.width // self.downsample_ratio),
                     num_bins=self.num_bins,
                     events=(events_t[positive_idx], events_xy[positive_idx]),
                     output_index=False,
-                    normalize='standardization'
+                    normalize='None' # Normalize only after concat
                 )
 
                 voxel_grid_neg, _ = create_voxel_grid_with_index(
                     source_H=self.height,
                     source_W=self.width,
-                    target_H=self.height,
-                    target_W=self.width,
+                    target_H=int(self.height // self.downsample_ratio),
+                    target_W=int(self.width // self.downsample_ratio),
                     num_bins=self.num_bins,
                     events=(events_t[negative_idx], events_xy[negative_idx]),
                     output_index=False,
-                    normalize='standardization'
+                    normalize='None' # Normalize only after concat
                 )
 
                 voxel_grid_np = np.concatenate([voxel_grid_pos, voxel_grid_neg], axis=0)
+                voxel_grid_np = normalize_array(voxel_grid=voxel_grid_np, normalize='standardization')
 
             voxel_grid_all_np.append(voxel_grid_np)
 
         voxel_grid_all_np = np.stack(voxel_grid_all_np, axis=0)
-        voxel_grid_all_torch = torch.from_numpy(voxel_grid_all_np)
+        voxel_grid_all_torch = torch.from_numpy(voxel_grid_all_np).float()
 
         # (L, C, H, W)
         return voxel_grid_all_torch, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)

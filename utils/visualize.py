@@ -3,16 +3,18 @@ import os
 import cv2
 import numpy as np
 
-import utils
+from .utils import load_frames, load_events, get_events_between, get_frame_between, render, undistort_event_count_image
 
 
 def view_processed_data(sequence_path, window_size_ms=100):
     # load frames
-    frames, flir_t, flir_res, flir_K, flir_dist = utils.load_frames(sequence_path)
+    frames, flir_t, flir_res, flir_K, flir_dist = load_frames(sequence_path)
     num_frames = len(frames)
     print(f"Loaded {num_frames} FLIR frames")
     # load events
-    events, events_t, events_res, events_K, events_dist = utils.load_events(sequence_path)
+    events, events_t, events_res, events_K, events_dist = load_events(sequence_path)
+    print(f'raw events shape: {events.shape}')
+    print(f'raw events x min: {events[:, 0].min()} max: {events[:, 1].max()} y min: {events[:, 0].min()} max: {events[:, 1].max()}')
 
     # FORWARD POINT MAPPING
     #events = utils.undistort_events_forward(events, events_K, events_dist, round=True, res=events_res)
@@ -40,17 +42,17 @@ def view_processed_data(sequence_path, window_size_ms=100):
         window_end = current_time + window_size_us
         
         # Get events in the current time window
-        events_in_window = utils.get_events_between(events, events_t, window_start, window_end)
+        events_in_window = get_events_between(events, events_t, window_start, window_end)
         print(f"Events in window ({window_start} - {window_end}): {len(events_in_window)}")
 
         # create event frame
-        event_frame = utils.render(events_in_window, events_res)
+        event_frame = render(events_in_window, events_res)
         
         # BACKWARD IMAGE MAPPING
-        event_frame = utils.undistort_event_count_image(event_frame, events_K, events_dist, events_res)
+        event_frame = undistort_event_count_image(event_frame, events_K, events_dist, events_res)
 
         # get flir frame
-        flir_frame = utils.get_frame_between(frames, flir_t, window_start, window_end)
+        flir_frame = get_frame_between(frames, flir_t, window_start, window_end)
         
         # --- Create visualizations ---
         # Create an overlay by blending the two images

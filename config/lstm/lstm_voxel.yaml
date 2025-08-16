@@ -20,8 +20,10 @@ num_workers: 2
 persistent_workers: True
 height: 720
 width: 720
+downsample_ratio: 2.0
 num_bins: 5
-use_polarity: True
+use_polarity: True # If use polarity, the final channels will be doubled
+accumulation_interval_ms: 150
 use_cache: True
 cache_root: '/fs/nexus-scratch/haowenyu/ActionDataCache'
 
