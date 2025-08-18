@@ -34,16 +34,23 @@ class ModelInterface(pl.LightningModule):
 
     # Caution: self.model.train() is invoked
     def training_step(self, batch, batch_idx):
-        train_input, valid_len, train_labels = batch
-        train_out = self(train_input)
-        train_loss = self.loss_function(train_out, train_labels, 'train')
+        train_input, valid_len, train_labels = batch   # train_labels: [B] long, class indices
+        train_out = self(train_input)                  # [B, T, C]
 
-        label_digit = train_labels.argmax(axis=1)
-        out_digit = train_out.argmax(axis=1)
-        correct_num = torch.sum(label_digit == out_digit).cpu().item()
+        B, T, C = train_out.shape
+        last_idx = valid_len - 1
+        train_out_last = train_out[torch.arange(B), last_idx]   # [B, C]
 
-        self.log('train_loss', train_loss, on_step=True, on_epoch=False, prog_bar=True)
-        self.log('train_acc', correct_num / len(out_digit), on_step=True, on_epoch=False, prog_bar=True)
+        # if using CrossEntropyLoss, labels should be [B] integer indices
+        train_loss = self.loss_function(train_out_last, train_labels, 'train')
+
+        # predictions
+        out_digit   = train_out_last.argmax(dim=1)   # [B]
+        label_digit = train_labels                   # [B]
+        correct_num = (label_digit == out_digit).sum().item()
+
+        self.log('train_loss', train_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_accuracy', correct_num / B, on_step=True, on_epoch=True, prog_bar=True)
 
         return train_loss
 
@@ -51,14 +58,19 @@ class ModelInterface(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         val_input, valid_len, val_labels = batch
         val_out = self(val_input)
-        val_loss = self.loss_function(val_out, val_labels, 'validation')
+    
+        B, T, C = val_out.shape
+        last_idx = valid_len - 1   # valid_len counts length, so subtract 1 for index
+        # Gather the logits at last valid index
+        val_out_last = val_out[torch.arange(B), last_idx]   # [B, num_classes]
+        val_loss = self.loss_function(val_out_last, val_labels, 'validation')
 
-        label_digit = val_labels.argmax(axis=1)
-        out_digit = val_out.argmax(axis=1)
+        label_digit = val_labels.argmax()
+        out_digit = val_out_last.argmax(axis=1)
         correct_num = torch.sum(label_digit == out_digit).cpu().item()
 
         self.log('val_loss', val_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('val_acc', correct_num / len(out_digit), on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_accuracy', correct_num / len(out_digit), on_step=False, on_epoch=True, prog_bar=True)
 
         return val_loss
 
@@ -74,7 +86,7 @@ class ModelInterface(pl.LightningModule):
         correct_num = torch.sum(label_digit == out_digit).cpu().item()
 
         self.log('test_loss', test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('test_acc', correct_num / len(out_digit), on_step=False, on_epoch=True, prog_bar=True)
+        self.log('test_accuracy', correct_num / len(out_digit), on_step=False, on_epoch=True, prog_bar=True)
 
         return test_loss
 
@@ -107,27 +119,9 @@ class ModelInterface(pl.LightningModule):
             raise ValueError('Invalid lr_scheduler type!')
         return [optimizer], [scheduler]
 
-    def __calculate_loss_and_log(self, inputs, labels, loss_dict: Dict[str, Tuple[float, Callable]], stage: str):
-        raw_loss_list = [func(inputs, labels) for _, func in loss_dict.values()]
-        weighted_loss = [weight * raw_loss for (weight, _), raw_loss in zip(loss_dict.values(), raw_loss_list)]
-        for name, raw_loss in zip(loss_dict.keys(), raw_loss_list):
-            self.log(f'{stage}_{name}', raw_loss.item(), on_step=False, on_epoch=True, prog_bar=False)
-
-        return sum(weighted_loss)
-
     def __configure_loss(self):
-        # User-defined function list. Recommend using `_loss` suffix in loss names.
-        loss_dict = {
-            'cross_entropy_loss': (1.0, cross_entropy_loss),
-        }
-
         def loss_func(inputs, labels, stage):
-            return self.__calculate_loss_and_log(
-                inputs=inputs,
-                labels=labels,
-                loss_dict=loss_dict,
-                stage=stage
-            )
+            return cross_entropy_loss(inputs, labels)
 
         return loss_func
 

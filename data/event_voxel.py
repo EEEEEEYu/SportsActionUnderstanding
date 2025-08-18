@@ -134,7 +134,8 @@ class EventVoxel(data.Dataset):
             use_cache: bool,
             cache_root: str,
             purpose: str,
-            downsample_ratio: float
+            downsample_ratio: float,
+            accumulation_interval_ms: float,
         ):
         self.dataset_dir = dataset_dir
         self.preprocessor = Preprocessor(dataset_dir=dataset_dir)
@@ -146,6 +147,7 @@ class EventVoxel(data.Dataset):
         self.cache_root = cache_root
         self.purpose = purpose
         self.downsample_ratio = downsample_ratio
+        self.accumulation_interval_ms = accumulation_interval_ms
 
     @staticmethod
     def collate_fn(batch):
@@ -158,16 +160,16 @@ class EventVoxel(data.Dataset):
         return len(self.preprocessor)
 
     def __getitem__(self, idx):
-        events_t_list, events_xy_list, events_p_list, class_name = self.preprocessor[idx]
+        events_t_list, events_xy_list, events_p_list, class_name, seq_folder = self.preprocessor[idx]
 
         if self.use_cache:
-            rel_seq_path = os.path.relpath(self.dataset_dir)
+            rel_seq_path = os.path.relpath(seq_folder)
             cache_dir_path = os.path.join(self.cache_root, rel_seq_path)
-            cached_voxel_path = os.path.join(cache_dir_path, f"voxel_{self.num_bins}_{('up' if self.use_polarity else 'np')}.pt")
+            cached_voxel_path = os.path.join(cache_dir_path, f"voxel_{self.num_bins}_{self.accumulation_interval_ms}ms.pt")
 
             if os.path.exists(cached_voxel_path):
                 data = torch.load(cached_voxel_path)
-                return data, CLS_NAME_TO_INT[class_name]
+                return data, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)
 
         else:
             cached_voxel_path = None
@@ -219,6 +221,11 @@ class EventVoxel(data.Dataset):
 
         voxel_grid_all_np = np.stack(voxel_grid_all_np, axis=0)
         voxel_grid_all_torch = torch.from_numpy(voxel_grid_all_np).float()
+
+        if self.use_cache:
+            if not os.path.exists(cache_dir_path):
+                os.makedirs(cache_dir_path, exist_ok=True)
+            torch.save(voxel_grid_all_torch, cached_voxel_path)
 
         # (L, C, H, W)
         return voxel_grid_all_torch, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)

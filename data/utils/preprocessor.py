@@ -21,6 +21,7 @@ class Preprocessor(Dataset):
         events_p_path = os.path.join(self.dataset_dir, sequence_name, 'proc', 'events', 'events_p.npy')
         events_t_path = os.path.join(self.dataset_dir, sequence_name, 'proc', 'events', 'events_t.npy')
         events_xy_path = os.path.join(self.dataset_dir, sequence_name, 'proc', 'events', 'events_xy.npy')
+        sequence_folder = os.path.join(self.dataset_dir, sequence_name, 'proc')
 
         events_p_all = np.load(events_p_path, mmap_mode='r').astype(np.uint8)
         events_t_all = np.load(events_t_path, mmap_mode='r').astype(np.int64)
@@ -71,5 +72,5 @@ class Preprocessor(Dataset):
 
             cur_t0 = cur_t1  # move to next interval
 
-        return events_t_sliced, events_xy_sliced, events_p_sliced, sequence_name[-6:]
+        return events_t_sliced, events_xy_sliced, events_p_sliced, sequence_name[-6:], sequence_folder
 

@@ -14,7 +14,8 @@ class ConvLSTMCell(nn.Module):
         if norm_type == 'instance':
             self.norm = nn.InstanceNorm2d(hidden_channels)
         elif norm_type == 'layer':
-            self.norm = lambda x: nn.LayerNorm(x.shape[1:]).to(x.device)
+            # normalize across channels & spatial dims per sample
+            self.norm = nn.GroupNorm(1, hidden_channels)  # "LayerNorm-like" for convs
         else:
             self.norm = None
 
@@ -28,7 +29,6 @@ class ConvLSTMCell(nn.Module):
         c_cur = f * c_prev + i * g
         h_cur = o * torch.tanh(c_cur)
 
-        # Apply normalization if configured
         if self.norm:
             h_cur = self.norm(h_cur)
 
@@ -36,8 +36,8 @@ class ConvLSTMCell(nn.Module):
 
     def init_state(self, batch_size, spatial_size, device):
         H, W = spatial_size
-        return (torch.zeros(batch_size, self.hidden_channels, H, W, device=device),
-                torch.zeros(batch_size, self.hidden_channels, H, W, device=device))
+        return (torch.randn(batch_size, self.hidden_channels, H, W, device=device),
+                torch.randn(batch_size, self.hidden_channels, H, W, device=device))
 
 class EncoderBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
@@ -176,17 +176,17 @@ class ConvLstm(nn.Module):
         return torch.stack(output, dim=1)
 
 def main():
-    B, T, C, H, W = 1, 13, 10, 640, 480
-    model = Convlstm(
-        height=640,
-        width=480,
+    B, T, C, H, W = 2, 13, 10, 360, 360
+    model = ConvLstm(
+        height=H,
+        width=W,
         num_classes=10,
         in_channels=C,
         embedding_dim=128,
         hidden_channels=64,
         lstm_kernel=(3, 3),
         num_lstm_layers=2,
-        norm_type='instance'  # or 'layer'
+        norm_type='layer'  # or 'layer'
     )
     x = torch.randn(B, T, C, H, W)
     y = model(x)
