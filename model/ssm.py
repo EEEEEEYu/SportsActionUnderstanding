@@ -32,17 +32,22 @@ class ConvResidualBlock(nn.Module):
 
 
 class ConvEncoder(nn.Module):
-    def __init__(self, in_channels, hidden_dim, downsample_factor=4):
+    def __init__(self, in_channels, hidden_channels, common_blocks=2, downsample_blocks=4):
         super().__init__()
         layers = []
-        current_dim = in_channels
-        stride_levels = int(torch.log2(torch.tensor(downsample_factor)))
+        current_channels = in_channels
 
-        for _ in range(stride_levels):
+        for _ in range(downsample_blocks):
             layers.append(
-                ConvResidualBlock(current_dim, hidden_dim, stride=2)
+                ConvResidualBlock(current_channels, current_channels * 2, stride=2)
             )
-            current_dim = hidden_dim
+            current_channels *= 2
+
+        for _ in range(common_blocks):
+            layers.append(
+                ConvResidualBlock(current_channels, hidden_channels, stride=1)
+            )
+            current_channels = hidden_channels
 
         self.encoder = nn.Sequential(*layers)
 
@@ -51,11 +56,11 @@ class ConvEncoder(nn.Module):
 
 
 
-class ConvSsm(nn.Module):
-    def __init__(self, num_classes, in_channels, ssm_dim, state_dim, downsample_factor=4):
+class Ssm(nn.Module):
+    def __init__(self, num_classes, in_channels, ssm_dim, state_dim, common_blocks=2, downsample_blocks=4):
         super().__init__()
 
-        self.encoder = ConvEncoder(in_channels, hidden_dim=ssm_dim, downsample_factor=downsample_factor)
+        self.encoder = ConvEncoder(in_channels, hidden_channels=ssm_dim, common_blocks=common_blocks, downsample_blocks=downsample_blocks)
         self.pool = nn.AdaptiveAvgPool2d(1)  # Global spatial pooling
 
         self.bridge = nn.Sequential(
@@ -234,19 +239,20 @@ class VectorSsm(nn.Module):
         self.net.reset_state()"""
 
 def main():
-    B, L, C, H, W = 2, 5, 3, 640, 480
+    B, L, C, H, W = 2, 5, 10, 360, 360
     num_classes = 10
     ssm_dim = 128
     state_dim = 64
 
-    model = ConvSsm(num_classes, in_channels=C, ssm_dim=ssm_dim, state_dim=state_dim, downsample_factor=8)
+    model = Ssm(num_classes, in_channels=C, ssm_dim=ssm_dim, state_dim=state_dim, common_blocks=2, downsample_blocks=4)
+    model = model.cuda()
 
-    dummy_input = torch.randn(B, L, C, H, W)
+    dummy_input = torch.randn(B, L, C, H, W).cuda()
     output = model(dummy_input)
 
     print(f"Output shape: {output.shape}")  # Expect (B, L, num_classes)
 
-    B, L, N, H = 2, 5, 5000, 256
+    """B, L, N, H = 2, 5, 5000, 256
     num_classes = 10
     input_dim = H
     ssm_dim = 128
@@ -257,7 +263,7 @@ def main():
     dummy_input = torch.randn(B, L, N, H)  # (B, L, N, H)
     output = model(dummy_input)
 
-    print(f"Output shape: {output.shape}")  # Expect (B, L, num_classes)
+    print(f"Output shape: {output.shape}")  # Expect (B, L, num_classes)"""
 
 
 if __name__ == "__main__":

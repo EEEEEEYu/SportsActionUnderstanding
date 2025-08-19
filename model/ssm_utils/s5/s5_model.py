@@ -272,7 +272,7 @@ class S5SSM(torch.nn.Module):
         batch_shape = (batch_size,) if batch_size is not None else ()
         _, C_tilde = self.get_BC_tilde()
 
-        return torch.zeros((*batch_shape, C_tilde.shape[-2]))
+        return torch.zeros((*batch_shape, C_tilde.shape[-2]), device=C_tilde.device)
 
     def get_BC_tilde(self):
         match self.bcInit:

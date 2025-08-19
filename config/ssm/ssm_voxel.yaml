@@ -28,13 +28,13 @@ use_cache: True
 cache_root: '/fs/nexus-scratch/haowenyu/ActionDataCache'
 
 ##################### Model Architecture #####################
-model_class_name: conv_lstm
+model_class_name: ssm
 num_classes: 16
 in_channels: 10
-embedding_dim: 128
-hidden_channels: 64
-num_lstm_layers: 2
-norm_type: 'layer'  # or 'layer'
+ssm_dim: 128
+state_dim: 128
+common_blocks: 2
+downsample_blocks: 4
 
 ##################### Optimizers and Loss Functions #####################
 weight_decay: 1e-6

@@ -23,9 +23,23 @@ import inspect
 from argparse import ArgumentParser
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import TQDMProgressBar
 
 from model_interface import ModelInterface
 from data_interface import DataInterface
+
+
+class MultiRowTQDMProgressBar(TQDMProgressBar):
+    def get_metrics(self, trainer, pl_module):
+        metrics = super().get_metrics(trainer, pl_module)
+        # manually reformat as multi-line string
+        rows = []
+        keys = list(metrics.keys())
+        for i in range(0, len(keys), 5):  # 5 metrics per row
+            chunk = {k: metrics[k] for k in keys[i:i+5]}
+            row_str = " ".join(f"{k}:{v:.5f}" for k,v in chunk.items())
+            rows.append(row_str)
+        return {"metrics": "\n".join(rows)}
 
 
 # For all built-in callback functions, see: https://lightning.ai/docs/pytorch/stable/api_references.html#callbacks
@@ -33,30 +47,27 @@ from data_interface import DataInterface
 def load_callbacks(config):
     callbacks = []
     # Monitor a metric and stop training when it stops improving
-    callbacks.append(plc.EarlyStopping(
+    """callbacks.append(plc.EarlyStopping(
         monitor='val_loss',
-        mode='max',
+        mode='min',
         patience=10,
         min_delta=0.001
-    ))
+    ))"""
+
+    callbacks.append(
+        MultiRowTQDMProgressBar()
+    )
 
     # Save the model periodically by monitoring a quantity
     if config['enable_checkpointing']:
         # Best checkpoint
         callbacks.append(plc.ModelCheckpoint(
             every_n_epochs=1,
-            monitor='val_loss',
+            monitor='val_accuracy',
             mode='max',
-            filename='best-{epoch:03d}-{val_loss:.5f}',
+            filename='best-{epoch:03d}-{val_accuracy:.5f}',
             save_top_k=1,
-            save_last=False,
-        ))
-
-        # Epoch checkpoint. Store the model of latest epoch
-        callbacks.append(plc.ModelCheckpoint(
-            every_n_epochs=1,
-            filename='latest-{epoch:03d}-{val_loss:.5f}',
-            monitor=None,
+            save_last=True,
         ))
 
     # Monitor learning rate decay
