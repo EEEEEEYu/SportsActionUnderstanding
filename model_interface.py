@@ -19,13 +19,15 @@ import torch.optim.lr_scheduler as lrs
 import pytorch_lightning as pl
 
 from loss.loss_funcs import cross_entropy_loss
+from utils.metrics.sequence_classification import save_confusion_matrix, top1_accuracy, \
+    top5_accuracy, time_to_correct_decision, early_classification_accuracy, auc_over_accuracy_curve
+
 from typing import Callable, Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import itertools
 import os
-from sklearn.metrics import confusion_matrix
 
 
 class ModelInterface(pl.LightningModule):
@@ -40,72 +42,63 @@ class ModelInterface(pl.LightningModule):
         self.val_epoch_correct = 0
         self.val_epoch_total = 0
         self.log_dir_full = kwargs['log_dir_full']
+        self.train_epoch_outputs = []
         self.val_epoch_outputs = []
 
     def forward(self, x):
         return self.model(x)
     
     def on_train_epoch_end(self):
-        self.log('train_accuracy', float(self.train_epoch_correct) / float(self.train_epoch_total), on_step=False, on_epoch=True, prog_bar=True)
-        self.train_epoch_correct = 0
-        self.train_epoch_total = 0
+        top1_acc = top1_accuracy(self.train_epoch_outputs)
+        self.log('train_acc_top1', top1_acc, on_step=False, on_epoch=True, prog_bar=True)
 
-    def on_validation_epoch_end(self):
-        self.log('val_accuracy', float(self.val_epoch_correct) / float(self.val_epoch_total), on_step=False, on_epoch=True, prog_bar=True)
-        self.val_epoch_correct = 0
-        self.val_epoch_total = 0
+        top5_acc = top5_accuracy(self.train_epoch_outputs)
+        self.log('train_acc_top5', top5_acc, on_step=False, on_epoch=True, prog_bar=True)
 
-        # Suppose you store predictions and labels in lists
-        y_true = np.concatenate([o["labels"] for o in self.val_epoch_outputs])
-        y_pred = np.concatenate([o["preds"] for o in self.val_epoch_outputs])
+        train_TTCD = time_to_correct_decision(self.train_epoch_outputs)
+        self.log('train_TTCD', train_TTCD, on_step=False, on_epoch=True, prog_bar=True)
+
+        train_ECA = early_classification_accuracy(self.train_epoch_outputs)
+        self.log('train_ECA@20%', train_ECA[20], on_step=False, on_epoch=True, prog_bar=True)
+        self.log('train_ECA@30%', train_ECA[30], on_step=False, on_epoch=True, prog_bar=True)
+        self.log('train_ECA@40%', train_ECA[40], on_step=False, on_epoch=True, prog_bar=True)
+        self.log('train_ECA@50%', train_ECA[50], on_step=False, on_epoch=True, prog_bar=True)
+
+        train_AUCOAC = auc_over_accuracy_curve(acc_dict=train_ECA)
+        self.log('train_AUCOAC', train_AUCOAC, on_step=False, on_epoch=True, prog_bar=True)
 
         class_names = [str(i) for i in range(self.hparams.num_classes)]
-        self.save_confusion_matrix(y_true, y_pred, class_names, save_path=os.path.join(self.log_dir_full, "val_confusion_matrix.png"), normalize=False)
+        save_confusion_matrix(self.train_epoch_outputs, class_names=class_names, 
+                              save_path=os.path.join(self.log_dir_full, "train_confusion_matrix.png"), normalize=False)
+
+        del self.train_epoch_outputs
+        self.train_epoch_outputs = []
+
+    def on_validation_epoch_end(self):
+        top1_acc = top1_accuracy(self.val_epoch_outputs)
+        self.log('val_acc_top1', top1_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+        top5_acc = top5_accuracy(self.val_epoch_outputs)
+        self.log('val_acc_top5', top5_acc, on_step=False, on_epoch=True, prog_bar=True)
+
+        val_TTCD = time_to_correct_decision(self.val_epoch_outputs)
+        self.log('train_TTCD', val_TTCD, on_step=False, on_epoch=True, prog_bar=True)
+
+        val_ECA = early_classification_accuracy(self.val_epoch_outputs)
+        self.log('val_ECA@20%', val_ECA[20], on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_ECA@30%', val_ECA[30], on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_ECA@40%', val_ECA[40], on_step=False, on_epoch=True, prog_bar=True)
+        self.log('val_ECA@50%', val_ECA[50], on_step=False, on_epoch=True, prog_bar=True)
+
+        val_AUCOAC = auc_over_accuracy_curve(acc_dict=val_ECA)
+        self.log('val_AUCOAC', val_AUCOAC, on_step=False, on_epoch=True, prog_bar=True)
+
+        class_names = [str(i) for i in range(self.hparams.num_classes)]
+        save_confusion_matrix(self.val_epoch_outputs, class_names=class_names, 
+                              save_path=os.path.join(self.log_dir_full, "val_confusion_matrix.png"), normalize=False)
+
         del self.val_epoch_outputs
         self.val_epoch_outputs = []
-
-    @staticmethod
-    def save_confusion_matrix(y_true, y_pred, class_names, save_path, normalize):
-        """
-        Save a confusion matrix plot as a PNG file.
-        
-        Args:
-            y_true (list or np.ndarray): Ground-truth class indices.
-            y_pred (list or np.ndarray): Predicted class indices.
-            class_names (list[str]): Names of classes (len = num_classes).
-            save_path (str): Where to save the PNG.
-            normalize (bool): If True, normalize rows to sum to 1.
-        """
-        cm = confusion_matrix(y_true, y_pred, labels=np.arange(len(class_names)))
-
-        if normalize:
-            cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
-            cm = np.nan_to_num(cm)  # avoid NaNs if row sum = 0
-
-        fig, ax = plt.subplots(figsize=(8, 8))
-        im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
-        plt.colorbar(im, ax=ax)
-
-        # Title & axis labels
-        ax.set_title("Confusion Matrix")
-        ax.set_xlabel("Predicted Label")
-        ax.set_ylabel("True Label")
-        ax.set_xticks(np.arange(len(class_names)))
-        ax.set_yticks(np.arange(len(class_names)))
-        ax.set_xticklabels(class_names, rotation=45, ha="right")
-        ax.set_yticklabels(class_names)
-
-        # Annotate each cell
-        fmt = ".2f" if normalize else "d"
-        thresh = cm.max() / 2.0
-        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-            ax.text(j, i, format(cm[i, j], fmt),
-                    ha="center", va="center",
-                    color="white" if cm[i, j] > thresh else "black")
-
-        plt.tight_layout()
-        plt.savefig(save_path, dpi=200)
-        plt.close(fig)
 
     # Caution: self.model.train() is invoked
     def training_step(self, batch, batch_idx):
@@ -119,22 +112,24 @@ class ModelInterface(pl.LightningModule):
         # if using CrossEntropyLoss, labels should be [B] integer indices
         train_loss = self.loss_function(train_out_last, train_labels, 'train')
 
-        # predictions
-        train_preds   = train_out_last.argmax(dim=1).detach()
-        correct_num = (train_preds == train_labels).sum().item()
-
-        self.train_epoch_correct += correct_num
-        self.train_epoch_total += B
         self.log('train_loss', train_loss, on_step=True, on_epoch=False, prog_bar=True)
 
         if self.hparams.model_class_name == 'ssm':
             self.model.reset_state(B)
 
-        return {
+        topk = 5
+        train_topk_preds = train_out.topk(k=topk, dim=-1).indices.cpu().numpy()  # shape (B, T, topk)
+
+        train_batch_output = {
             "loss": train_loss,
-            "preds": train_preds.cpu().numpy(),
-            "labels": train_labels.cpu().numpy()
+            "preds": train_topk_preds,
+            "labels": train_labels.cpu().numpy(),
+            "valid_len": valid_len.cpu().numpy(),
         }
+
+        self.train_epoch_outputs.append(train_batch_output)
+
+        return train_batch_output
 
     # Caution: self.model.eval() is invoked and this function executes within a <with torch.no_grad()> context
     def validation_step(self, batch, batch_idx):
@@ -147,20 +142,19 @@ class ModelInterface(pl.LightningModule):
         val_out_last = val_out[torch.arange(B), last_idx]   # [B, num_classes]
         val_loss = self.loss_function(val_out_last, val_labels, 'validation')
 
-        val_preds = val_out_last.argmax(axis=1).detach()
-        correct_num = torch.sum(val_preds == val_labels).cpu().item()
-
-        self.val_epoch_correct += correct_num
-        self.val_epoch_total += B
         self.log('val_loss', val_loss, on_step=True, on_epoch=False, prog_bar=True)
 
         if self.hparams.model_class_name == 'ssm':
             self.model.reset_state(B)
 
+        topk = 5
+        val_topk_preds = val_out.topk(k=topk, dim=-1).indices.cpu().numpy()  # shape (B, T, topk)
+
         val_batch_output = {
             "loss": val_loss,
-            "preds": val_preds.cpu().numpy(),
-            "labels": val_labels.cpu().numpy()
+            "preds": val_topk_preds,
+            "labels": val_labels.cpu().numpy(),
+            "valid_len": valid_len.cpu().numpy(),
         }
 
         self.val_epoch_outputs.append(val_batch_output)
