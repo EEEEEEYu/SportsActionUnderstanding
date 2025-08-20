@@ -168,7 +168,7 @@ class EventVoxel(data.Dataset):
             cached_voxel_path = os.path.join(cache_dir_path, f"voxel_{self.num_bins}_{self.accumulation_interval_ms}ms.pt")
 
             if os.path.exists(cached_voxel_path):
-                data = torch.load(cached_voxel_path)
+                data = torch.load(cached_voxel_path, weights_only=True)
                 return data, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)
 
         else:

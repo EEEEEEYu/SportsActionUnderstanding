@@ -21,6 +21,7 @@ import pytorch_lightning.callbacks as plc
 import inspect
 
 from argparse import ArgumentParser
+from pathlib import Path
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import TQDMProgressBar
@@ -37,6 +38,7 @@ class MultiRowTQDMProgressBar(TQDMProgressBar):
         keys = list(metrics.keys())
         for i in range(0, len(keys), 5):  # 5 metrics per row
             chunk = {k: metrics[k] for k in keys[i:i+5]}
+            del chunk['v_num']
             row_str = " ".join(f"{k}:{v:.5f}" for k,v in chunk.items())
             rows.append(row_str)
         return {"metrics": "\n".join(rows)}
@@ -138,11 +140,7 @@ def get_checkpoint_path(config):
 
 def main(config):
     # Set random seed
-    pl.seed_everything(config['seed'])
-
-    # Instantiate model and data module
-    data_module = DataInterface(**config)
-    model_module = ModelInterface(**config)         
+    pl.seed_everything(config['seed'])      
 
     checkpoint_directory, checkpoint_file_path = get_checkpoint_path(config=config) if config['enable_checkpointing'] else (None, None)
 
@@ -150,14 +148,23 @@ def main(config):
     # Versions are only used for consecutive checkpointing. If a checkpoint starts from version_n, then new checkpoint directory will be version_{n+1}
     # When the loaded checkpoint reached max_epoch, the new training will stop immediately
     if checkpoint_directory is not None:
-        logger = TensorBoardLogger(save_dir='.', name=checkpoint_directory)
+        logger = TensorBoardLogger(save_dir='.', name=checkpoint_directory, version=None)
+        log_dir_full = Path(checkpoint_directory).parent
+        config['log_dir_full'] = str(log_dir_full)
     else:
         # Create a new logging directory
         print("Training from scratch...")
         log_dir_name_with_time = os.path.join(config['log_dir'], datetime.datetime.now().strftime("%Y%m%d-%H-%M-%S"))
-        logger = TensorBoardLogger(save_dir='.', name=f"{log_dir_name_with_time}-{config['experiment_name']}")
-    
-    config['logger'] = logger
+        log_dir_full = f"{log_dir_name_with_time}-{config['experiment_name']}"
+        logger = TensorBoardLogger(save_dir='.', name=log_dir_full, version=None)
+        config['log_dir_full'] = log_dir_full
+
+    # Instantiate model and data module
+    data_module = DataInterface(**config)
+    model_module = ModelInterface(**config) 
+
+    # Add logger
+    config['logger'] = logger  
 
     # Load callback functions for Trainer
     config['callbacks'] = load_callbacks(config=config)

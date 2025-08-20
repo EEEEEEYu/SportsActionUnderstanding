@@ -3,15 +3,15 @@ import os
 import tqdm
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
-
-
-from crop_dataset.crop_dataset import BSLoader
-
+from .utils.preprocessor import Preprocessor
+from torch.nn.utils.rnn import pad_sequence
 
 import numpy as np
 import torch
 import torch.nn as nn
 from scipy.stats import norm
+
+CLS_NAME_TO_INT = {f"{i:06d}": i for i in range(16)}
 
 def strict_standard_normal(d, seed=0):
     """
@@ -190,15 +190,14 @@ class FourierVec(Dataset):
                  radius=1.0,
                  max_events=80000,
                  downsample_rate=0.1,
-                 calib_dir="crop_dataset/calibration_default",
                  split='train',
                  mode='fast'
                  ):
         assert cam in ['event', 'rgb'], "Camera type must be either 'event' or 'rgb'."
         assert split in ['train', 'test'], "Split must be either 'train' or 'test'."
 
+        self.preprocessor = Preprocessor(dataset_dir=dataset_dir)
         self.dataset_dir = dataset_dir
-        self.calib_dir = calib_dir
         self.split = split
         self.cam = cam
         self.max_events = max_events
@@ -241,14 +240,6 @@ class FourierVec(Dataset):
 
     def __getitem__(self, idx):
         cls_name, seq_path = self.cls_seq_dirs[idx]
-        loader = BSLoader(
-            seq_path=seq_path,
-            calib_path=self.calib_dir,
-            use_metadata=False,
-            to_tensor=True,
-            crop=False,
-            disable_tqdm=True,
-        )
 
         # (B, L, XXXX)
         if self.cam == 'event':
@@ -270,7 +261,7 @@ class FourierVec(Dataset):
 
             # If computed, then just load the saved tensor
             if os.path.exists(cached_fourier_vec_path):
-                data = torch.load(cached_fourier_vec_path)
+                data = torch.load(cached_fourier_vec_path, weights_only=True)
                 target_len = int(self.downsample_rate * self.max_events)
                 downsample_idx = torch.randperm(data.shape[0])[:target_len]
                 data = data[downsample_idx]

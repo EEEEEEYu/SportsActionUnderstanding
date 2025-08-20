@@ -21,6 +21,13 @@ import pytorch_lightning as pl
 from loss.loss_funcs import cross_entropy_loss
 from typing import Callable, Dict, Tuple
 
+import matplotlib.pyplot as plt
+import numpy as np
+import itertools
+import os
+from sklearn.metrics import confusion_matrix
+
+
 class ModelInterface(pl.LightningModule):
     def __init__(self, **kwargs):
         super().__init__()
@@ -32,6 +39,8 @@ class ModelInterface(pl.LightningModule):
         self.train_epoch_total = 0
         self.val_epoch_correct = 0
         self.val_epoch_total = 0
+        self.log_dir_full = kwargs['log_dir_full']
+        self.val_epoch_outputs = []
 
     def forward(self, x):
         return self.model(x)
@@ -44,7 +53,59 @@ class ModelInterface(pl.LightningModule):
     def on_validation_epoch_end(self):
         self.log('val_accuracy', float(self.val_epoch_correct) / float(self.val_epoch_total), on_step=False, on_epoch=True, prog_bar=True)
         self.val_epoch_correct = 0
-        self.val_epoch_correct = 0
+        self.val_epoch_total = 0
+
+        # Suppose you store predictions and labels in lists
+        y_true = np.concatenate([o["labels"] for o in self.val_epoch_outputs])
+        y_pred = np.concatenate([o["preds"] for o in self.val_epoch_outputs])
+
+        class_names = [str(i) for i in range(self.hparams.num_classes)]
+        self.save_confusion_matrix(y_true, y_pred, class_names, save_path=os.path.join(self.log_dir_full, "val_confusion_matrix.png"), normalize=False)
+        del self.val_epoch_outputs
+        self.val_epoch_outputs = []
+
+    @staticmethod
+    def save_confusion_matrix(y_true, y_pred, class_names, save_path, normalize):
+        """
+        Save a confusion matrix plot as a PNG file.
+        
+        Args:
+            y_true (list or np.ndarray): Ground-truth class indices.
+            y_pred (list or np.ndarray): Predicted class indices.
+            class_names (list[str]): Names of classes (len = num_classes).
+            save_path (str): Where to save the PNG.
+            normalize (bool): If True, normalize rows to sum to 1.
+        """
+        cm = confusion_matrix(y_true, y_pred, labels=np.arange(len(class_names)))
+
+        if normalize:
+            cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
+            cm = np.nan_to_num(cm)  # avoid NaNs if row sum = 0
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+        im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+        plt.colorbar(im, ax=ax)
+
+        # Title & axis labels
+        ax.set_title("Confusion Matrix")
+        ax.set_xlabel("Predicted Label")
+        ax.set_ylabel("True Label")
+        ax.set_xticks(np.arange(len(class_names)))
+        ax.set_yticks(np.arange(len(class_names)))
+        ax.set_xticklabels(class_names, rotation=45, ha="right")
+        ax.set_yticklabels(class_names)
+
+        # Annotate each cell
+        fmt = ".2f" if normalize else "d"
+        thresh = cm.max() / 2.0
+        for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+            ax.text(j, i, format(cm[i, j], fmt),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black")
+
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=200)
+        plt.close(fig)
 
     # Caution: self.model.train() is invoked
     def training_step(self, batch, batch_idx):
@@ -59,9 +120,8 @@ class ModelInterface(pl.LightningModule):
         train_loss = self.loss_function(train_out_last, train_labels, 'train')
 
         # predictions
-        out_digit   = train_out_last.argmax(dim=1).detach()     # [B]
-        label_digit = train_labels                              # [B]
-        correct_num = (label_digit == out_digit).sum().item()
+        train_preds   = train_out_last.argmax(dim=1).detach()
+        correct_num = (train_preds == train_labels).sum().item()
 
         self.train_epoch_correct += correct_num
         self.train_epoch_total += B
@@ -70,7 +130,11 @@ class ModelInterface(pl.LightningModule):
         if self.hparams.model_class_name == 'ssm':
             self.model.reset_state(B)
 
-        return train_loss
+        return {
+            "loss": train_loss,
+            "preds": train_preds.cpu().numpy(),
+            "labels": train_labels.cpu().numpy()
+        }
 
     # Caution: self.model.eval() is invoked and this function executes within a <with torch.no_grad()> context
     def validation_step(self, batch, batch_idx):
@@ -83,9 +147,8 @@ class ModelInterface(pl.LightningModule):
         val_out_last = val_out[torch.arange(B), last_idx]   # [B, num_classes]
         val_loss = self.loss_function(val_out_last, val_labels, 'validation')
 
-        out_digit = val_out_last.argmax(axis=1).detach()
-        label_digit = val_labels.argmax()
-        correct_num = torch.sum(label_digit == out_digit).cpu().item()
+        val_preds = val_out_last.argmax(axis=1).detach()
+        correct_num = torch.sum(val_preds == val_labels).cpu().item()
 
         self.val_epoch_correct += correct_num
         self.val_epoch_total += B
@@ -94,7 +157,15 @@ class ModelInterface(pl.LightningModule):
         if self.hparams.model_class_name == 'ssm':
             self.model.reset_state(B)
 
-        return val_loss
+        val_batch_output = {
+            "loss": val_loss,
+            "preds": val_preds.cpu().numpy(),
+            "labels": val_labels.cpu().numpy()
+        }
+
+        self.val_epoch_outputs.append(val_batch_output)
+
+        return val_batch_output
 
     # Caution: self.model.eval() is invoked and this function executes within a <with torch.no_grad()> context
     def test_step(self, batch, batch_idx):
@@ -103,12 +174,10 @@ class ModelInterface(pl.LightningModule):
         test_out = self(test_input)
         test_loss = self.loss_function(test_out, test_labels, 'test')
 
-        label_digit = test_labels.argmax(axis=1)
-        out_digit = test_out.argmax(axis=1)
-        correct_num = torch.sum(label_digit == out_digit).cpu().item()
+        test_preds = test_out.argmax(axis=1).detach()
+        correct_num = torch.sum(test_preds == test_labels).cpu().item()
 
         self.log('test_loss', test_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log('test_accuracy', correct_num / len(out_digit), on_step=False, on_epoch=True, prog_bar=True)
 
         return test_loss
 
