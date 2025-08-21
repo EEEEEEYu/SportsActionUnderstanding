@@ -184,22 +184,22 @@ class FastVecKM(nn.Module):
 class FourierVec(Dataset):
     def __init__(self, 
                  dataset_dir, 
-                 cam,
+                 use_cache,
+                 cache_root,
                  pt_dim=3, 
-                 enc_dim=256, 
+                 enc_dim=128, 
                  radius=1.0,
                  max_events=80000,
                  downsample_rate=0.1,
-                 split='train',
+                 purpose='train',
                  mode='fast'
                  ):
-        assert cam in ['event', 'rgb'], "Camera type must be either 'event' or 'rgb'."
-        assert split in ['train', 'test'], "Split must be either 'train' or 'test'."
 
         self.preprocessor = Preprocessor(dataset_dir=dataset_dir)
         self.dataset_dir = dataset_dir
-        self.split = split
-        self.cam = cam
+        self.use_cache = use_cache
+        self.cache_root = cache_root
+        self.purpose = purpose
         self.max_events = max_events
         self.downsample_rate = downsample_rate
         self.enc_dim = enc_dim
@@ -211,107 +211,65 @@ class FourierVec(Dataset):
         else:
             raise ValueError(f"Unknown fourier feature mode: {mode}")
 
-        self.cls_seq_dirs = []
-        # iterate over the folders in os.path.join(self.dataset_dir, self.split)
-        for _dir in os.listdir(os.path.join(self.dataset_dir, self.split)):
-            # iterate over the sequences
-            for seq_dir in os.listdir(os.path.join(self.dataset_dir, self.split, _dir)):
-                seq_path = os.path.join(self.dataset_dir, self.split, _dir, seq_dir)
-                if not os.path.isdir(seq_path):
-                    continue
-
-                cls_name = os.path.basename(seq_path).split('_')[0]
-                self.cls_seq_dirs.append((cls_name, seq_path))
-
-        self.CLS_NAME_TO_INT = {
-            'cheek': 0,
-            'chin': 1,
-            'ear': 2,
-            'eyes': 3,
-            'forehead': 4,
-            'head': 5,
-            'mouth': 6,
-            'nose': 7
-        }
-
+    @staticmethod
+    def collate_fn(batch):
+        sequences, labels = zip(*batch)
+        valid_len = torch.tensor([seq.shape[0] for seq in sequences], dtype=torch.long)
+        padded_sequences = pad_sequence(sequences, batch_first=True)
+        return padded_sequences, valid_len, torch.stack(labels)
     
     def __len__(self):
         return len(self.cls_seq_dirs)
 
     def __getitem__(self, idx):
-        cls_name, seq_path = self.cls_seq_dirs[idx]
-
         # (B, L, XXXX)
-        if self.cam == 'event':
-            all_events = loader.event_frames # num_frames list of [1, num_events, 4] tensors with (x, y, t, p)
+        events_t_list, events_xy_list, events_p_list, class_name, seq_folder = self.preprocessor[idx]
 
-            # Define base paths
-            project_root = "/fs/nexus-projects/DVS_Actions/SimonSays"
-            scratch_root = "/fs/nexus-scratch/haowenyu/SimonSays"
+        if self.use_cache:
+            rel_seq_path = os.path.relpath(seq_folder)
+            cache_dir_path = os.path.join(self.cache_root, rel_seq_path, 'fourier_vec')
+            cached_fourier_vec_path = os.path.join(cache_dir_path, f"voxel_{self.num_bins}_{self.accumulation_interval_ms}ms.pt")
 
-            # Compute relative path under 'SimonSays/...'
-            rel_seq_path = os.path.relpath(seq_path, project_root)
-
-            # Construct scratch-based cache path
-            scratch_seq_path = os.path.join(scratch_root, rel_seq_path)
-            cached_fourier_vec_path = os.path.join(scratch_seq_path, f'fourier_vec_{self.max_events}_{self.enc_dim}.pt')
-
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(cached_fourier_vec_path), exist_ok=True)
-
-            # If computed, then just load the saved tensor
             if os.path.exists(cached_fourier_vec_path):
                 data = torch.load(cached_fourier_vec_path, weights_only=True)
-                target_len = int(self.downsample_rate * self.max_events)
-                downsample_idx = torch.randperm(data.shape[0])[:target_len]
-                data = data[downsample_idx]
-                print(f'Found cached fourier feature of shape {data.shape}, loading from {cached_fourier_vec_path}')
-                return torch.tensor(self.CLS_NAME_TO_INT[cls_name]).long(), data
+                return data, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)
+        else:
+            cached_fourier_vec_path = None
 
-            all_features = []
-            for idx, events_xytp in enumerate(all_events):
-                print(f'Processing element {idx} from sequence: {seq_path}')
-                if events_xytp.shape[0] == 0:
-                    all_features.append(torch.zeros((1, int(self.max_events * self.downsample_rate), self.enc_dim * 2)))
-                    continue
-                events_xy = events_xytp.squeeze()[:, :2]
-                events_t = events_xytp.squeeze()[:, 2]
-                # First normalization, correct built-in offset
+        all_features = []
+        for idx, events_xy, events_t in enumerate(zip(events_xy_list, events_t_list)):
+            print(f'Processing element {idx} from sequence: {os.path.join(self.dataset_dir, seq_folder)}')
 
-                # Second normalization, make it numerical stable for fourier feature compute
-                events_xy /= 11
-                events_t = (events_t - events_t.min()).unsqueeze(-1) / 1e6 * 10
+            # Second normalization, make it numerical stable for fourier feature compute
+            events_xy /= 11
+            events_t = (events_t - events_t.min()).unsqueeze(-1) / 1e6 * 10
 
-                normalized_txy = torch.cat([events_t, events_xy], dim=1)
+            normalized_txy = torch.cat([events_t, events_xy], dim=1)
 
-                if normalized_txy.shape[0] > self.max_events:
-                    r_idx = torch.randperm(normalized_txy.shape[0])[:self.max_events]
-                    normalized_txy = normalized_txy[r_idx]
+            if normalized_txy.shape[0] > self.max_events:
+                r_idx = torch.randperm(normalized_txy.shape[0])[:self.max_events]
+                normalized_txy = normalized_txy[r_idx]
 
-                # (max_events, enc_dim)
-                G = self.method.forward(normalized_txy)
+            # (max_events, enc_dim)
+            G = self.method.forward(normalized_txy)
 
-                # (max_events, enc_dim * 2)
-                G = torch.cat((G.real, G.imag), dim=-1)
+            # (max_events, enc_dim * 2)
+            G = torch.cat((G.real, G.imag), dim=-1)
 
-                # (max_events * downsample_rate, enc_dim * 2)
-                target_len = int(self.downsample_rate * self.max_events)
-                downsample_idx = torch.randperm(G.shape[0])[:target_len]
-                G = G[downsample_idx]
-                
-                # Pad if needed
-                if G.shape[0] < target_len:
-                    pad_len = target_len - G.shape[0]
-                    pad_tensor = torch.zeros((pad_len, G.shape[1]), device=G.device, dtype=G.dtype)
-                    G = torch.cat([G, pad_tensor], dim=0)
+            # (max_events * downsample_rate, enc_dim * 2)
+            target_len = int(self.downsample_rate * self.max_events)
+            downsample_idx = torch.randperm(G.shape[0])[:target_len]
+            G = G[downsample_idx]
 
-                all_features.append(G.unsqueeze(0))
+            all_features.append(G.unsqueeze(0))
 
-            # Always override the cached tensor
-            data = torch.cat(all_features, dim=0)
+        # Always override the cached tensor
+        data = torch.cat(all_features, dim=0)
+        
+        if self.use_cache:
             print(f'Saving fourier vector to {cached_fourier_vec_path}')
+            if not os.path.exists(cache_dir_path):
+                os.makedirs(cache_dir_path, exist_ok=True)
             torch.save(data, cached_fourier_vec_path)
 
-            return torch.tensor(self.CLS_NAME_TO_INT[cls_name]).long(), data
-        elif self.cam == 'rgb':
-            return cls_name, loader.flir_frames
+        return data, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)

@@ -24,6 +24,7 @@ class SlowFastSequenceModel(nn.Module):
         dummy_slow = dummy_fast[:, :, ::alpha, :, :]
         with torch.no_grad():
             feats = self.feature_extractor([dummy_slow, dummy_fast])
+
         c_out = feats.shape[1]
 
         # New classifier (per time step)

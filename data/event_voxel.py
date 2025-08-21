@@ -164,7 +164,7 @@ class EventVoxel(data.Dataset):
 
         if self.use_cache:
             rel_seq_path = os.path.relpath(seq_folder)
-            cache_dir_path = os.path.join(self.cache_root, rel_seq_path)
+            cache_dir_path = os.path.join(self.cache_root, rel_seq_path, 'event_voxel')
             cached_voxel_path = os.path.join(cache_dir_path, f"voxel_{self.num_bins}_{self.accumulation_interval_ms}ms.pt")
 
             if os.path.exists(cached_voxel_path):
