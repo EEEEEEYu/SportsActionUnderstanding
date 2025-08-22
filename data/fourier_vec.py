@@ -1,7 +1,5 @@
-import dataset
 import os
 import tqdm
-import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from .utils.preprocessor import Preprocessor
 from torch.nn.utils.rnn import pad_sequence
@@ -186,10 +184,11 @@ class FourierVec(Dataset):
                  dataset_dir, 
                  use_cache,
                  cache_root,
+                 accumulation_interval_ms=150,
                  pt_dim=3, 
                  enc_dim=128, 
                  radius=1.0,
-                 max_events=80000,
+                 max_events=100000,
                  downsample_rate=0.1,
                  purpose='train',
                  mode='fast'
@@ -199,6 +198,7 @@ class FourierVec(Dataset):
         self.dataset_dir = dataset_dir
         self.use_cache = use_cache
         self.cache_root = cache_root
+        self.accumulation_interval_ms = accumulation_interval_ms
         self.purpose = purpose
         self.max_events = max_events
         self.downsample_rate = downsample_rate
@@ -218,58 +218,96 @@ class FourierVec(Dataset):
         padded_sequences = pad_sequence(sequences, batch_first=True)
         return padded_sequences, valid_len, torch.stack(labels)
     
+    # Helper: per-timestep downsample + pad to fixed N'
+    @staticmethod
+    def downsample_and_pad_per_timestep(X_t: torch.Tensor, keep: int) -> torch.Tensor:
+        """
+        X_t: (N_t, H) tensor for one timestep (can be empty: N_t == 0)
+        keep: target N' to return
+        returns: (keep, H)
+        """
+        H = X_t.shape[-1]
+        if X_t.numel() == 0:
+            # No events -> zeros
+            return torch.zeros(keep, H, dtype=torch.float32)
+        N_t = X_t.shape[0]
+        if N_t >= keep:
+            idx_t = torch.randperm(N_t)[:keep]
+            return X_t[idx_t]
+        else:
+            # Use all, then sample with replacement to fill
+            rem = keep - N_t
+            fill_idx = torch.randint(low=0, high=N_t, size=(rem,))
+            return torch.cat([X_t, X_t[fill_idx]], dim=0)
+
+    # Helper: load cache (supports list or legacy tensor)
+    @staticmethod
+    def load_cached_list(path: str):
+        obj = torch.load(path, map_location='cpu')
+        if isinstance(obj, list):
+            # Expected: list[Tensor (N_t, H)]
+            return [t.float() for t in obj]
+        elif torch.is_tensor(obj):
+            # Legacy tensor of shape (L, N, H) -> convert to list
+            return [obj[t].clone().float() for t in range(obj.shape[0])]
+        else:
+            raise RuntimeError(f"Unexpected cache format at {path}: {type(obj)}")
+    
     def __len__(self):
-        return len(self.cls_seq_dirs)
+        return len(self.preprocessor)
 
     def __getitem__(self, idx):
-        # (B, L, XXXX)
+        # Unpack preprocessed event lists for a single sequence
         events_t_list, events_xy_list, events_p_list, class_name, seq_folder = self.preprocessor[idx]
 
-        if self.use_cache:
-            rel_seq_path = os.path.relpath(seq_folder)
-            cache_dir_path = os.path.join(self.cache_root, rel_seq_path, 'fourier_vec')
-            cached_fourier_vec_path = os.path.join(cache_dir_path, f"voxel_{self.num_bins}_{self.accumulation_interval_ms}ms.pt")
+        # Build cache path
+        rel_seq_path = os.path.relpath(seq_folder)
+        cache_dir_path = os.path.join(self.cache_root, rel_seq_path, 'fourier_vec')
+        cached_fourier_vec_path = os.path.join(
+            cache_dir_path,
+            f"fourier_vec_LIST_{self.max_events}_{self.enc_dim}_{self.accumulation_interval_ms}ms.pt"
+        )
 
-            if os.path.exists(cached_fourier_vec_path):
-                data = torch.load(cached_fourier_vec_path, weights_only=True)
-                return data, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)
+        # Try cache first
+        if self.use_cache and os.path.exists(cached_fourier_vec_path):
+            full_vectors_list = self.load_cached_list(cached_fourier_vec_path)
         else:
-            cached_fourier_vec_path = None
+            # Compute per-timestep fourier vectors into a list (variable N_t)
+            full_vectors_list = []
+            for t_idx, (events_xy, events_t) in enumerate(zip(events_xy_list, events_t_list)):
+                print(f'Processing element {t_idx} from sequence: {seq_folder}')
+                # ---- Normalize & prepare inputs ----
+                events_xy = torch.from_numpy(events_xy).float() / 11.0  # (n_t, 2)
+                events_t = torch.from_numpy(events_t)                    # (n_t,)
+                # Normalize timestamps to ~[0, 10]
+                events_t = (events_t - events_t.min()).unsqueeze(-1) / 1e6 * 10.0
 
-        all_features = []
-        for idx, events_xy, events_t in enumerate(zip(events_xy_list, events_t_list)):
-            print(f'Processing element {idx} from sequence: {os.path.join(self.dataset_dir, seq_folder)}')
+                normalized_txy = torch.cat([events_t, events_xy], dim=1)  # (n_t, 3)
 
-            # Second normalization, make it numerical stable for fourier feature compute
-            events_xy /= 11
-            events_t = (events_t - events_t.min()).unsqueeze(-1) / 1e6 * 10
+                # Subsample to at most self.max_events if necessary
+                if normalized_txy.shape[0] > self.max_events:
+                    r_idx = torch.randperm(normalized_txy.shape[0])[:self.max_events]
+                    normalized_txy = normalized_txy[r_idx]
 
-            normalized_txy = torch.cat([events_t, events_xy], dim=1)
+                if normalized_txy.shape[0] == 0:
+                    # No events in this window → store empty (we’ll pad later)
+                    full_vectors = torch.zeros(0, self.enc_dim * 2, dtype=torch.float32)
+                else:
+                    # Compute fourier vectors
+                    G = self.method.forward(normalized_txy)  # Complex(n_t, enc_dim)
+                    full_vectors = torch.cat((G.real, G.imag), dim=-1).float()  # (n_t, 2*enc_dim)
 
-            if normalized_txy.shape[0] > self.max_events:
-                r_idx = torch.randperm(normalized_txy.shape[0])[:self.max_events]
-                normalized_txy = normalized_txy[r_idx]
+                full_vectors_list.append(full_vectors)
 
-            # (max_events, enc_dim)
-            G = self.method.forward(normalized_txy)
-
-            # (max_events, enc_dim * 2)
-            G = torch.cat((G.real, G.imag), dim=-1)
-
-            # (max_events * downsample_rate, enc_dim * 2)
-            target_len = int(self.downsample_rate * self.max_events)
-            downsample_idx = torch.randperm(G.shape[0])[:target_len]
-            G = G[downsample_idx]
-
-            all_features.append(G.unsqueeze(0))
-
-        # Always override the cached tensor
-        data = torch.cat(all_features, dim=0)
-        
-        if self.use_cache:
-            print(f'Saving fourier vector to {cached_fourier_vec_path}')
-            if not os.path.exists(cache_dir_path):
+            # Save list cache
+            if self.use_cache:
                 os.makedirs(cache_dir_path, exist_ok=True)
-            torch.save(data, cached_fourier_vec_path)
+                torch.save(full_vectors_list, cached_fourier_vec_path)
 
-        return data, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)
+        # ---- Downsample+pad each timestep to a fixed N' ----
+        keep = max(1, int(round(self.max_events * self.downsample_rate)))  # N' (fixed across timesteps)
+        downsampled_list = [self.downsample_and_pad_per_timestep(X_t, keep) for X_t in full_vectors_list]
+        # Stack along time: (L, keep, H)
+        downsampled_features = torch.stack(downsampled_list, dim=0)
+
+        return downsampled_features, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)

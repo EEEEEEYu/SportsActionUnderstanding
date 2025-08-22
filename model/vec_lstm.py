@@ -39,6 +39,7 @@ class VecLstm(nn.Module):
     def forward(self, x):
         """
         x: (B, T, N, H)
+        return: (B, T, num_classes)  # per-frame classification
         """
         B, T, N, H = x.shape
         
@@ -50,20 +51,15 @@ class VecLstm(nn.Module):
             x = x.mean(dim=-1)        # (B, T, N)
         
         # Step 2. LSTM
-        out, (h_n, c_n) = self.lstm(x)  # out: (B, T, hidden_dim)
+        out, _ = self.lstm(x)  # out: (B, T, hidden_dim * num_directions)
         
-        # Step 3. Last hidden state
-        if self.bidirectional:
-            last_hidden = torch.cat([h_n[-2], h_n[-1]], dim=1)  # (B, hidden_dim*2)
-        else:
-            last_hidden = h_n[-1]  # (B, hidden_dim)
+        # Step 3. Classifier applied at every timestep
+        logits = self.fc(out)  # (B, T, num_classes)
         
-        # Step 4. Classifier
-        logits = self.fc(last_hidden)  # (B, num_classes)
         return logits
 
 def main():
-    B, T, N, H = 4, 10, 8, 64   # batch=4, seq_len=10, N=8 vectors of dim 64
+    B, T, N, H = 4, 10, 5000, 128   # smaller N for testing
     num_classes = 5
 
     x = torch.randn(B, T, N, H)
@@ -78,7 +74,7 @@ def main():
     )
 
     logits = model(x)
-    print(logits.shape)  # (4, 5)
+    print(logits.shape)  # (B, T, num_classes) → (4, 10, 5)
 
 if __name__ == '__main__':
     main()

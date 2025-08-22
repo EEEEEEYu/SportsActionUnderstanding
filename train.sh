@@ -1,1 +1,1 @@
-python main.py --config_path config/lstm/lstm_voxel.yaml
+python main.py --config_path config/lstm/lstm_fourier_vec.yaml
