@@ -14,12 +14,12 @@ strategy: auto
 dataset_class_name: event_voxel
 dataset_dir: '/fs/nexus-scratch/haowenyu/SportsActionUnderstanding/ActionData'
 split_ratios: [0.8, 0.1, 0.1]
-batch_size: 2
+batch_size: 4
 test_batch_size: 2
-num_workers: 2
+num_workers: 4
 persistent_workers: True
-height: 360
-width: 360
+height: 720
+width: 720
 downsample_ratio: 2.0 # Original resolution of events are 720 x 720. model_input_size * downsample_ratio = original_size
 num_bins: 5
 use_polarity: True # If use polarity, the final channels will be doubled
@@ -46,7 +46,7 @@ lr_decay_min_lr: 1e-5
 
 ###################### Tensorboard Logger Setting #####################
 log_dir: 'lightning_logs'
-experiment_name: 'main'
+experiment_name: 'ssm_voxel'
 
 ##################### Checkpoint & Restart Control #####################
 enable_checkpointing: True

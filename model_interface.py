@@ -16,7 +16,7 @@ import inspect
 import torch
 import importlib
 import torch.optim.lr_scheduler as lrs
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 
 from loss.loss_funcs import cross_entropy_loss
 from utils.metrics.sequence_classification import save_confusion_matrix, top1_accuracy, \
@@ -55,7 +55,7 @@ class ModelInterface(pl.LightningModule):
         top5_acc = top5_accuracy(self.train_epoch_outputs)
         self.log('train_acc_top5', top5_acc, on_step=False, on_epoch=True, prog_bar=True)
 
-        train_TTCD = time_to_correct_decision(self.train_epoch_outputs)
+        train_TTCD, _ = time_to_correct_decision(self.train_epoch_outputs, window_size=5)
         self.log('train_TTCD', train_TTCD, on_step=False, on_epoch=True, prog_bar=True)
 
         train_ECA = early_classification_accuracy(self.train_epoch_outputs)
@@ -81,7 +81,7 @@ class ModelInterface(pl.LightningModule):
         top5_acc = top5_accuracy(self.val_epoch_outputs)
         self.log('val_acc_top5', top5_acc, on_step=False, on_epoch=True, prog_bar=True)
 
-        val_TTCD = time_to_correct_decision(self.val_epoch_outputs)
+        val_TTCD, _ = time_to_correct_decision(self.val_epoch_outputs, window_size=5)
         self.log('train_TTCD', val_TTCD, on_step=False, on_epoch=True, prog_bar=True)
 
         val_ECA = early_classification_accuracy(self.val_epoch_outputs)

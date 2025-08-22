@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import VivitModel, VivitConfig
 
-class FrameWiseViViT(nn.Module):
+class Vivit(nn.Module):
     def __init__(self, num_classes, pretrained_model_name="google/vivit-base"):
         super().__init__()
         # Load self‑attention backbone (no final pooling)
@@ -29,7 +29,7 @@ class FrameWiseViViT(nn.Module):
 def test_framewise_vivit():
     B, L, C, H, W = 2, 5, 3, 224, 224
     num_classes = 10
-    model = FrameWiseViViT(num_classes=num_classes)
+    model = Vivit(num_classes=num_classes)
     model.eval()
 
     dummy = torch.randn(B, L, C, H, W)

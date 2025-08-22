@@ -16,32 +16,64 @@ import os
 import datetime
 
 import yaml
-import pytorch_lightning as pl
-import pytorch_lightning.callbacks as plc
+import lightning.pytorch as pl
+import lightning.pytorch.callbacks as plc
 import inspect
 
 from argparse import ArgumentParser
 from pathlib import Path
-from pytorch_lightning import Trainer
-from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import TQDMProgressBar
+from lightning.pytorch import Trainer
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import RichProgressBar
+from lightning.pytorch.callbacks.progress.rich_progress import RichProgressBarTheme
+from rich.table import Table
 
 from model_interface import ModelInterface
 from data_interface import DataInterface
 
 
-class MultiRowTQDMProgressBar(TQDMProgressBar):
+class MultiRowRichProgressBar(RichProgressBar):
+    def __init__(self, metrics_per_row: int = 4, refresh_rate: int = 1, leave: bool = False):
+        super().__init__(theme=RichProgressBarTheme())
+        self.metrics_per_row = metrics_per_row
+
     def get_metrics(self, trainer, pl_module):
         metrics = super().get_metrics(trainer, pl_module)
-        # manually reformat as multi-line string
-        rows = []
+        if "v_num" in metrics:
+            del metrics["v_num"]
+        return metrics
+
+    def _render_metrics_table(self, metrics: dict) -> Table:
+        """
+        Format metrics into a Rich table with multiple rows.
+        """
+        table = Table(show_header=False, box=None, expand=True)
+
         keys = list(metrics.keys())
-        for i in range(0, len(keys), 5):  # 5 metrics per row
-            chunk = {k: metrics[k] for k in keys[i:i+5]}
-            del chunk['v_num']
-            row_str = " ".join(f"{k}:{v:.5f}" for k,v in chunk.items())
-            rows.append(row_str)
-        return {"metrics": "\n".join(rows)}
+        for i in range(0, len(keys), self.metrics_per_row):
+            chunk_keys = keys[i : i + self.metrics_per_row]
+            row = []
+            for k in chunk_keys:
+                v = metrics[k]
+                if isinstance(v, (int, float)):
+                    row.append(f"{k}: {v:.5f}")
+                else:
+                    row.append(f"{k}: {v}")
+            table.add_row(*row)
+
+        return table
+
+    def render(self, *args, **kwargs):
+        """
+        Override RichProgressBar.render to display metrics as multi-row table.
+        """
+        renderables = super().render(*args, **kwargs)
+        metrics = self.get_metrics(self._trainer, self._trainer.lightning_module)
+
+        if renderables and metrics:
+            renderables[-1] = self._render_metrics_table(metrics)
+
+        return renderables
 
 
 # For all built-in callback functions, see: https://lightning.ai/docs/pytorch/stable/api_references.html#callbacks
@@ -57,7 +89,7 @@ def load_callbacks(config):
     ))"""
 
     callbacks.append(
-        MultiRowTQDMProgressBar()
+        MultiRowRichProgressBar(refresh_rate=1, leave=False, metrics_per_row=5)
     )
 
     # Save the model periodically by monitoring a quantity
@@ -65,9 +97,9 @@ def load_callbacks(config):
         # Best checkpoint
         callbacks.append(plc.ModelCheckpoint(
             every_n_epochs=1,
-            monitor='val_accuracy',
+            monitor='val_acc_top1',
             mode='max',
-            filename='best-{epoch:03d}-{val_accuracy:.5f}',
+            filename='best-{epoch:03d}-{val_acc_top1:.5f}',
             save_top_k=1,
             save_last=True,
         ))

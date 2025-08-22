@@ -15,11 +15,11 @@ dataset_class_name: event_voxel
 dataset_dir: '/fs/nexus-scratch/haowenyu/SportsActionUnderstanding/ActionData'
 split_ratios: [0.8, 0.1, 0.1]
 batch_size: 2
-test_batch_size: 4
+test_batch_size: 2
 num_workers: 2
 persistent_workers: True
-height: 720
-width: 720
+height: 360
+width: 360
 downsample_ratio: 2.0 # Original resolution of events are 720 x 720. model_input_size * downsample_ratio = original_size
 num_bins: 5
 use_polarity: True # If use polarity, the final channels will be doubled
@@ -28,19 +28,19 @@ use_cache: True
 cache_root: '/fs/nexus-scratch/haowenyu/ActionDataCache'
 
 ##################### Model Architecture #####################
-model_class_name: conv_lstm
-in_channels: 10
+model_class_name: ssm
 num_classes: 16
-hidden_dim: 256 
-kernel_size: 3
-num_layers: 4
-embedding_dim: 256
+in_channels: 10
+ssm_dim: 256
+state_dim: 128
+common_blocks: 2
+downsample_blocks: 4
 
 ##################### Optimizers and Loss Functions #####################
 weight_decay: 1e-6
 lr: 1e-3
 lr_scheduler: step
-lr_decay_epochs: 5
+lr_decay_epochs: 8
 lr_decay_rate: 0.5
 lr_decay_min_lr: 1e-5
 
