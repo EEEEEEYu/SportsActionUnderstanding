@@ -3,7 +3,7 @@ deterministic: False
 use_compile: True
 inference_mode: False # If this one is True, use inference
 seed: 1234
-max_epochs: 40
+max_epochs: 50
 
 ##################### Distributed Training Control #####################
 devices: 1
@@ -14,7 +14,7 @@ strategy: auto
 dataset_class_name: fourier_vec
 dataset_dir: '/fs/nexus-scratch/haowenyu/SportsActionUnderstanding/ActionData'
 split_ratios: [0.8, 0.1, 0.1]
-batch_size: 2
+batch_size: 4
 test_batch_size: 2
 num_workers: 2
 persistent_workers: True
@@ -30,7 +30,7 @@ purpose: 'train'
 mode: 'fast'
 
 ##################### Model Architecture #####################
-model_class_name: transformer
+model_class_name: vec_transformer
 num_vectors: 10000        # N
 vector_dim: 256         # H
 num_classes: 16
@@ -45,13 +45,13 @@ max_len: 256
 weight_decay: 1e-6
 lr: 1e-3
 lr_scheduler: step
-lr_decay_epochs: 5
+lr_decay_epochs: 10
 lr_decay_rate: 0.5
 lr_decay_min_lr: 1e-5
 
 ###################### Tensorboard Logger Setting #####################
 log_dir: 'lightning_logs'
-experiment_name: 'main'
+experiment_name: 'transformer_vec'
 
 ##################### Checkpoint & Restart Control #####################
 enable_checkpointing: True

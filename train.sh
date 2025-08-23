@@ -1,1 +1,1 @@
-python main.py --config_path config/ssm/ssm_fourier_vec.yaml
+python main.py --config_path config/vivit/vivit_voxel.yaml

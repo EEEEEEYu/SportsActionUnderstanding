@@ -28,13 +28,17 @@ use_cache: True
 cache_root: '/fs/nexus-scratch/haowenyu/ActionDataCache'
 
 ##################### Model Architecture #####################
-model_class_name: ssm
+model_class_name: vivit
 num_classes: 16
 in_channels: 10
-ssm_dim: 256
-state_dim: 128
-common_blocks: 2
-downsample_blocks: 4
+image_size: 360
+tubelet_size: [1, 18, 18]  # temporal=1 → per-frame outputs
+hidden_size: 384           # lighter than default
+num_layers: 4
+num_heads: 8
+mlp_dim: 512
+dropout: 0.2
+attn_dropout: 0.2
 
 ##################### Optimizers and Loss Functions #####################
 weight_decay: 1e-6
@@ -46,7 +50,7 @@ lr_decay_min_lr: 1e-5
 
 ###################### Tensorboard Logger Setting #####################
 log_dir: 'lightning_logs'
-experiment_name: 'main'
+experiment_name: 'vivit_voxel'
 
 ##################### Checkpoint & Restart Control #####################
 enable_checkpointing: True

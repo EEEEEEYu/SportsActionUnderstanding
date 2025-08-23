@@ -103,8 +103,11 @@ class ModelInterface(pl.LightningModule):
     # Caution: self.model.train() is invoked
     def training_step(self, batch, batch_idx):
         train_input, valid_len, train_labels = batch   # train_labels: [B] long, class indices
-        train_out = self(train_input)                  # [B, T, C]
-
+        if self.hparams.model_class_name in ('vec_transformer', 'vivit'):
+            # Forward pass with causal mask during training (recommended for TTCD/early metrics)
+            train_out = self.model(train_input, valid_len=valid_len, causal=True)  # [B, T, C]
+        else:
+            train_out = self(train_input)                  # [B, T, C]
         B, T, C = train_out.shape
         last_idx = valid_len - 1
         train_out_last = train_out[torch.arange(B), last_idx]   # [B, C]
@@ -134,7 +137,11 @@ class ModelInterface(pl.LightningModule):
     # Caution: self.model.eval() is invoked and this function executes within a <with torch.no_grad()> context
     def validation_step(self, batch, batch_idx):
         val_input, valid_len, val_labels = batch
-        val_out = self(val_input)
+        if self.hparams.model_class_name in ('vec_transformer', 'vivit'):
+            # Forward pass with causal mask during training (recommended for TTCD/early metrics)
+            val_out = self.model(val_input, valid_len=valid_len, causal=True)  # [B, T, C]
+        else:
+            val_out = self(val_input)                  # [B, T, C]
     
         B, T, C = val_out.shape
         last_idx = valid_len - 1   # valid_len counts length, so subtract 1 for index
