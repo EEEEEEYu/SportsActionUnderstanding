@@ -16,7 +16,7 @@ dataset_dir: '/fs/nexus-scratch/haowenyu/SportsActionUnderstanding/ActionData'
 split_ratios: [0.8, 0.1, 0.1]
 batch_size: 2
 test_batch_size: 2
-num_workers: 4
+num_workers: 2
 persistent_workers: True
 accumulation_interval_ms: 150
 use_cache: True
@@ -30,11 +30,16 @@ purpose: 'train'
 mode: 'fast'
 
 ##################### Model Architecture #####################
-model_class_name: ssm
+model_class_name: transformer
+num_vectors: 10000        # N
+vector_dim: 256         # H
 num_classes: 16
-in_channels: 10
-ssm_dim: 256
-state_dim: 128
+d_model: 128
+nhead: 8
+num_encoder_layers: 4
+dim_feedforward: 256
+dropout: 0.2
+max_len: 256
 
 ##################### Optimizers and Loss Functions #####################
 weight_decay: 1e-6

@@ -1,0 +1,3 @@
+[submodule "submodule/veckm"]
+	path = submodule/veckm
+	url = https://github.com/dhyuan99/VecKM_flow_cpp.git

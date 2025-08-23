@@ -56,7 +56,7 @@ class VecTransformer(nn.Module):
                  num_encoder_layers=4,
                  dim_feedforward=256,
                  dropout=0.1,
-                 max_len=1000):
+                 max_len=256):
         super().__init__()
         self.reducer_H = nn.Sequential(   # (..., H) -> (..., 1)
             nn.Linear(vector_dim, 64), 

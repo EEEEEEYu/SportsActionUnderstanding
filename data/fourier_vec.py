@@ -1,7 +1,8 @@
 import os
-import tqdm
+from tqdm import tqdm
+import argparse
 from torch.utils.data import Dataset, DataLoader
-from .utils.preprocessor import Preprocessor
+from utils.preprocessor import Preprocessor
 from torch.nn.utils.rnn import pad_sequence
 
 import numpy as np
@@ -311,3 +312,46 @@ class FourierVec(Dataset):
         downsampled_features = torch.stack(downsampled_list, dim=0)
 
         return downsampled_features, torch.tensor(CLS_NAME_TO_INT[class_name], dtype=torch.long)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset_dir", type=str, required=True, help="Path to dataset")
+    parser.add_argument("--cache_root", type=str, required=True, help="Path to cache root")
+    parser.add_argument("--mode", type=str, default="fast", choices=["fast", "exact"])
+    parser.add_argument("--accum_interval", type=int, default=150, help="Accumulation window (ms)")
+    parser.add_argument("--max_events", type=int, default=100000)
+    parser.add_argument("--downsample_rate", type=float, default=0.1)
+    parser.add_argument("--enc_dim", type=int, default=128)
+    parser.add_argument("--use_cache", action="store_true", help="Whether to save cache")
+    parser.add_argument("--num_workers", type=int, default=4)
+    args = parser.parse_args()
+
+    dataset = FourierVec(
+        dataset_dir=args.dataset_dir,
+        use_cache=args.use_cache,
+        cache_root=args.cache_root,
+        accumulation_interval_ms=args.accum_interval,
+        max_events=args.max_events,
+        downsample_rate=args.downsample_rate,
+        enc_dim=args.enc_dim,
+        mode=args.mode,
+    )
+
+    # DataLoader is optional, but can parallelize preprocessing
+    loader = DataLoader(
+        dataset,
+        batch_size=1,  # one sequence at a time so cache matches __getitem__
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=FourierVec.collate_fn
+    )
+
+    print(f"Precomputing Fourier features for {len(dataset)} sequences...")
+    for _ in tqdm(loader, total=len(dataset)):
+        # Iterating automatically triggers __getitem__, which computes and caches
+        pass
+
+    print("Precomputation finished.")
+
+if __name__ == "__main__":
+    main()
