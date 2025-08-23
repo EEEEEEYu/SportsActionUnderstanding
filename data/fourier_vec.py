@@ -1,14 +1,15 @@
 import os
-from tqdm import tqdm
 import argparse
-from torch.utils.data import Dataset, DataLoader
-from utils.preprocessor import Preprocessor
-from torch.nn.utils.rnn import pad_sequence
 
 import numpy as np
 import torch
 import torch.nn as nn
+
+from tqdm import tqdm
+from torch.utils.data import Dataset, DataLoader
+from torch.nn.utils.rnn import pad_sequence
 from scipy.stats import norm
+from .utils.preprocessor import Preprocessor
 
 CLS_NAME_TO_INT = {f"{i:06d}": i for i in range(16)}
 
@@ -244,7 +245,7 @@ class FourierVec(Dataset):
     # Helper: load cache (supports list or legacy tensor)
     @staticmethod
     def load_cached_list(path: str):
-        obj = torch.load(path, map_location='cpu')
+        obj = torch.load(path, weights_only=True, map_location='cpu')
         if isinstance(obj, list):
             # Expected: list[Tensor (N_t, H)]
             return [t.float() for t in obj]

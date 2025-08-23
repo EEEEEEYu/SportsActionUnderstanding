@@ -41,7 +41,7 @@ lr_decay_min_lr: 1e-6
 
 ###################### Tensorboard Logger Setting #####################
 log_dir: 'lightning_logs'
-experiment_name: 'main'
+experiment_name: 'convlstm_hats'
 
 ##################### Checkpoint & Restart Control #####################
 enable_checkpointing: True

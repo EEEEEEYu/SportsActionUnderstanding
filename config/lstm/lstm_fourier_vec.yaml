@@ -14,7 +14,7 @@ strategy: auto
 dataset_class_name: fourier_vec
 dataset_dir: '/fs/nexus-scratch/haowenyu/SportsActionUnderstanding/ActionData'
 split_ratios: [0.8, 0.1, 0.1]
-batch_size: 2
+batch_size: 8
 test_batch_size: 2
 num_workers: 4
 persistent_workers: True
@@ -50,7 +50,7 @@ lr_decay_min_lr: 1e-5
 
 ###################### Tensorboard Logger Setting #####################
 log_dir: 'lightning_logs'
-experiment_name: 'main'
+experiment_name: 'lstm_fourier_vec'
 
 ##################### Checkpoint & Restart Control #####################
 enable_checkpointing: True

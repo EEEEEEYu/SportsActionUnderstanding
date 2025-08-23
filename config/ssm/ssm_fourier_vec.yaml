@@ -14,7 +14,7 @@ strategy: auto
 dataset_class_name: fourier_vec
 dataset_dir: '/fs/nexus-scratch/haowenyu/SportsActionUnderstanding/ActionData'
 split_ratios: [0.8, 0.1, 0.1]
-batch_size: 2
+batch_size: 4
 test_batch_size: 2
 num_workers: 4
 persistent_workers: True
@@ -30,11 +30,11 @@ purpose: 'train'
 mode: 'fast'
 
 ##################### Model Architecture #####################
-model_class_name: ssm
+model_class_name: vec_ssm
 num_classes: 16
-in_channels: 10
+input_dim: 256
 ssm_dim: 256
-state_dim: 128
+state_dim: 256
 
 ##################### Optimizers and Loss Functions #####################
 weight_decay: 1e-6
@@ -46,7 +46,7 @@ lr_decay_min_lr: 1e-5
 
 ###################### Tensorboard Logger Setting #####################
 log_dir: 'lightning_logs'
-experiment_name: 'main'
+experiment_name: 'ssm_fourier_vec'
 
 ##################### Checkpoint & Restart Control #####################
 enable_checkpointing: True

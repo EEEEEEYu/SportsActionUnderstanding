@@ -114,7 +114,7 @@ class ModelInterface(pl.LightningModule):
 
         self.log('train_loss', train_loss, on_step=True, on_epoch=False, prog_bar=True)
 
-        if self.hparams.model_class_name == 'ssm':
+        if self.hparams.model_class_name in ('ssm', 'vec_ssm'):
             self.model.reset_state(B)
 
         topk = 5
@@ -144,7 +144,7 @@ class ModelInterface(pl.LightningModule):
 
         self.log('val_loss', val_loss, on_step=True, on_epoch=False, prog_bar=True)
 
-        if self.hparams.model_class_name == 'ssm':
+        if self.hparams.model_class_name in ('ssm', 'vec_ssm'):
             self.model.reset_state(B)
 
         topk = 5
