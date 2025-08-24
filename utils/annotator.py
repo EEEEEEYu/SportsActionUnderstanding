@@ -7,6 +7,13 @@ Coordinate Systems:
 - No scaling needed as we're working with full resolution images
 """
 
+# TODO: save the crop info to crops.json (don't add it to data.json anymore)
+#       save name as well into this file
+# TODO: update convert_raw.py to read in crops.json and use it when saving
+# TODO: update viewer.py to take in right arrow key presses as crop start markers,
+#       left arrow key presses as crop end markers,
+#       and save out a crop.json file for it
+
 import os
 import threading
 import multiprocessing
@@ -390,315 +397,59 @@ class CombinedAnnotatorApp:
             messagebox.showwarning("No Crops", "Please add at least one crop before saving.")
             return
             
-        print(f'Saving {len(self.crops)} crops...')
+        print(f'Saving {len(self.crops)} crop metadata...')
         
-        # Save metadata with all crops
-        data = {
-            'crops': [crop.to_dict() for crop in self.crops],
-            'window_duration_ms': self.window_duration_ms
-        }
-        with open(os.path.join(seq_dir, PROPH_EXPORTED_FOLDER, METADATA_FILE), 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        # Create cropped data for each crop
-        if self.data_renderer is not None:
-            # Create main cropped directory
-            cropped_base_dir = seq_dir + '_cropped'
-            os.makedirs(cropped_base_dir, exist_ok=True)
-            
-            # Process each crop
-            for crop in self.crops:
-                # Create crop-specific directory
-                crop_dir = os.path.join(cropped_base_dir, crop.name.replace(' ', '_'))
-                os.makedirs(crop_dir, exist_ok=True)
-                
-                # Save cropped images and get timestamp offset
-                timestamp_offset = self._save_cropped_images(crop, crop_dir)
-                
-                # Save cropped events with the same timestamp offset
-                self._save_cropped_events(crop, crop_dir, seq_dir, timestamp_offset)
-                
-                print(f'Saved crop "{crop.name}" to: {crop_dir}')
-        
-        self.populate_file_browser(self.base_dir)
-
-    def _save_cropped_images(self, crop, crop_dir):
-        """Save cropped image data for a specific crop"""
-        # Create directories
-        flir_dir = os.path.join(crop_dir, FLIR_DIR)
-        os.makedirs(flir_dir, exist_ok=True)
-        
-        # Create frame subdirectory
-        frame_dir = os.path.join(flir_dir, 'frame')
-        os.makedirs(frame_dir, exist_ok=True)
-        
-        # Copy PNG files from original FLIR folder
-        source_frame_dir = os.path.join(self.loaded_sequence, FLIR_DIR, 'frame')
-        
-        # Load original data.json to get frame list
-        source_data_json = os.path.join(self.loaded_sequence, FLIR_DIR, 'data.json')
-        if os.path.exists(source_data_json):
-            with open(source_data_json, 'r') as f:
-                original_data = json.load(f)
-                original_frame_list = original_data.get('fields', {}).get('frame', [])
-        else:
-            print("Warning: Could not find original data.json")
+        if self.data_renderer is None:
+            messagebox.showwarning("No Data", "Please load data before saving.")
             return
         
-        # Copy relevant frame files
-        for i in range(crop.start_index, crop.end_index + 1):
-            if i < len(original_frame_list):
-                source_frame_path = os.path.join(self.loaded_sequence, FLIR_DIR, original_frame_list[i])
-                dest_frame_name = f'frame/frame_{i-crop.start_index:08d}.png'  # Save as PNG
-                dest_frame_path = os.path.join(flir_dir, dest_frame_name)
-                
-                if os.path.exists(source_frame_path):
-                    # Load the frame data - handle both NPY and PNG formats
-                    if source_frame_path.endswith('.npy'):
-                        frame_data = np.load(source_frame_path)
-                    elif source_frame_path.endswith(('.png', '.jpg', '.jpeg')):
-                        frame_data = cv2.imread(source_frame_path, cv2.IMREAD_GRAYSCALE)
-                        if frame_data is None:
-                            print(f"Warning: Could not read image {source_frame_path}")
-                            continue
-                    else:
-                        print(f"Warning: Unknown file format {source_frame_path}")
-                        continue
-                    
-                    # Apply zero rectangles if any
-                    if crop.zero_rectangles:
-                        # Create a copy to avoid modifying original
-                        frame_data = frame_data.copy()
-                        for rect in crop.zero_rectangles:
-                            x, y, w, h = rect
-                            # No scaling needed - we're working with full resolution
-                            # No coordinate adjustment needed since we're keeping full image
-                            
-                            # Ensure rectangle is within bounds
-                            x_start = max(0, x)
-                            y_start = max(0, y)
-                            x_end = min(frame_data.shape[1], x + w)
-                            y_end = min(frame_data.shape[0], y + h)
-                            # Zero out the rectangle region
-                            frame_data[y_start:y_end, x_start:x_end] = 0
-                    
-                    # Save the modified frame as PNG
-                    cv2.imwrite(dest_frame_path, frame_data)
-                else:
-                    print(f"Warning: Could not find frame {source_frame_path}")
-        
-        # Verify saved frames
-        saved_frames = [f for f in os.listdir(frame_dir) if f.endswith('.png')]
-        print(f"Saved {len(saved_frames)} frame files to {frame_dir}")
-        
-        # Load and adjust timestamps for cropped data
-        source_flir_dir = os.path.join(self.loaded_sequence, FLIR_DIR)
-        
-        # Load original timestamps
-        t_path = os.path.join(source_flir_dir, 't.npy')
-        t_received_path = os.path.join(source_flir_dir, 't_received.npy')
-        
-        if os.path.exists(t_path) and os.path.exists(t_received_path):
-            # Load full timestamps
-            t_full = np.load(t_path)
-            t_received_full = np.load(t_received_path)
+        # Process each crop and prepare crop metadata
+        crops_metadata = []
+        for crop in self.crops:
+            # Get FLIR timestamps for the crop
+            flir_start_time = self.data_renderer.flir_t[crop.start_index]
+            flir_end_time = self.data_renderer.flir_t[crop.end_index]
             
-            # Extract timestamps for the cropped range
-            t_cropped = t_full[crop.start_index:crop.end_index + 1]
-            t_received_cropped = t_received_full[crop.start_index:crop.end_index + 1]
+            # Get event timestamps for the crop time range
+            # Events are already in microseconds
+            events_in_range = utils.get_events_between(
+                self.data_renderer.events,
+                self.data_renderer.events_t,
+                flir_start_time,
+                flir_end_time
+            )
             
-            # Store the timestamp offset for synchronization
-            if len(t_cropped) > 0:
-                timestamp_offset = t_cropped[0]
+            if len(events_in_range) > 0:
+                event_start_time = float(events_in_range[0, 2])  # First event timestamp
+                event_end_time = float(events_in_range[-1, 2])   # Last event timestamp
             else:
-                timestamp_offset = 0
+                # No events in this range, use FLIR times
+                event_start_time = flir_start_time
+                event_end_time = flir_end_time
             
-            # Adjust timestamps to start from 0
-            if len(t_cropped) > 0:
-                t_cropped = t_cropped - t_cropped[0]
-            if len(t_received_cropped) > 0:
-                t_received_cropped = t_received_cropped - t_received_cropped[0]
-            
-            # Save adjusted timestamps
-            np.save(os.path.join(flir_dir, 't.npy'), t_cropped)
-            np.save(os.path.join(flir_dir, 't_received.npy'), t_received_cropped)
-            print(f"Saved adjusted timestamps for crop with offset {timestamp_offset}")
-        else:
-            print(f"Warning: Could not find timestamp files in {source_flir_dir}")
-            timestamp_offset = 0
+            crop_metadata = {
+                'name': crop.name,
+                'start_index': crop.start_index,
+                'end_index': crop.end_index,
+                'flir_start_time': float(flir_start_time),  # Convert to float for JSON
+                'flir_end_time': float(flir_end_time),
+                'event_start_time': event_start_time,
+                'event_end_time': event_end_time,
+                'zero_rectangles': crop.zero_rectangles
+            }
+            crops_metadata.append(crop_metadata)
         
-        # Load original data.json to preserve structure
-        source_data_json = os.path.join(source_flir_dir, 'data.json')
-        if os.path.exists(source_data_json):
-            with open(source_data_json, 'r') as f:
-                original_data = json.load(f)
-        else:
-            print("Warning: Could not find original data.json")
-            original_data = {}
+        # Save crop.json in the root folder of the sequence
+        crop_json_path = os.path.join(seq_dir, 'crop.json')
+        with open(crop_json_path, 'w') as f:
+            json.dump({
+                'crops': crops_metadata,
+                'window_duration_ms': self.window_duration_ms
+            }, f, indent=2)
+        print(f"Saved crop.json with {len(crops_metadata)} crops to {crop_json_path}")
         
-        # Generate frame list based on actual saved PNG files
-        frame_list = []
-        for i in range(crop.end_index - crop.start_index + 1):
-            frame_list.append(f'frame/frame_{i:08d}.png')  # PNG format
-        print(f"Generated frame list with {len(frame_list)} frames")
-        if len(frame_list) > 0:
-            print(f"  First frame: {frame_list[0]}")
-            print(f"  Last frame: {frame_list[-1]}")
-        
-        # Create updated data.json with correct frame list
-        updated_data = original_data.copy()
-        if 'fields' in updated_data:
-            updated_data['fields'] = updated_data['fields'].copy()
-            updated_data['fields']['frame'] = frame_list
-        
-        # Save updated data.json
-        data_json_path = os.path.join(flir_dir, 'data.json')
-        with open(data_json_path, 'w') as f:
-            json.dump(updated_data, f, indent=2)
-        print(f"Saved data.json to {data_json_path}")
-        print(f"  Number of frames in data.json: {len(updated_data.get('fields', {}).get('frame', []))}")
-        
-        # Save crop metadata
-        num_frames = crop.end_index - crop.start_index + 1
-        crop_metadata = {
-            'num_frames': num_frames,
-            'start_index': 0,
-            'end_index': num_frames - 1,
-            'original_start_index': crop.start_index,
-            'original_end_index': crop.end_index,
-            'zero_rectangles': crop.zero_rectangles,
-            'timestamp_offset': timestamp_offset
-        }
-        with open(os.path.join(crop_dir, 'metadata.json'), 'w') as f:
-            json.dump(crop_metadata, f, indent=2)
-        
-        return timestamp_offset
-
-    def _save_cropped_events(self, crop, crop_dir, seq_dir, flir_timestamp_offset):
-        """Save cropped event data for a specific crop with synchronized timestamps"""
-        # Get events for the crop time range
-        start_time = self.data_renderer.flir_t[crop.start_index]
-        end_time = self.data_renderer.flir_t[crop.end_index]
-        
-        # Get all events in the time range
-        cropped_events = utils.get_events_between(
-            self.data_renderer.events, 
-            self.data_renderer.events_t, 
-            start_time, 
-            end_time
-        )
-        
-        # Filter out events in zero rectangles if any
-        if crop.zero_rectangles and len(cropped_events) > 0:
-            mask = np.ones(len(cropped_events), dtype=bool)
-            for rect in crop.zero_rectangles:
-                x, y, w, h = rect
-                # No scaling needed - we're working with full resolution
-                
-                # Check if events fall within rectangle
-                event_x = cropped_events[:, 0]
-                event_y = cropped_events[:, 1]
-                rect_mask = (event_x >= x) & (event_x < x + w) & (event_y >= y) & (event_y < y + h)
-                mask &= ~rect_mask
-            
-            # Keep only events outside rectangles
-            cropped_events = cropped_events[mask]
-        
-        # Create exported subdirectory
-        cropped_exported_dir = os.path.join(crop_dir, PROPH_EXPORTED_FOLDER)
-        os.makedirs(cropped_exported_dir, exist_ok=True)
-        
-        # Copy and adjust files from the original proph_exported folder
-        source_proph_exported = os.path.join(seq_dir, PROPH_EXPORTED_FOLDER)
-        
-        # Copy data.json and event_packet_times.npy as-is
-        for file_name in ['data.json', 'event_packet_times.npy']:
-            source_file = os.path.join(source_proph_exported, file_name)
-            dest_file = os.path.join(cropped_exported_dir, file_name)
-            if os.path.exists(source_file):
-                shutil.copy2(source_file, dest_file)
-        
-        # Load and adjust timestamps
-        t_path = os.path.join(source_proph_exported, 't.npy')
-        t_received_path = os.path.join(source_proph_exported, 't_received.npy')
-        
-        if os.path.exists(t_path) and os.path.exists(t_received_path):
-            # Load full timestamps
-            t_full = np.load(t_path)
-            t_received_full = np.load(t_received_path)
-            
-            # Extract timestamps for the cropped range
-            t_cropped = t_full[crop.start_index:crop.end_index + 1]
-            t_received_cropped = t_received_full[crop.start_index:crop.end_index + 1]
-            
-            # Adjust timestamps to start from 0
-            if len(t_cropped) > 0:
-                t_cropped = t_cropped - t_cropped[0]
-            if len(t_received_cropped) > 0:
-                t_received_cropped = t_received_cropped - t_received_cropped[0]
-            
-            # Save adjusted timestamps
-            np.save(os.path.join(cropped_exported_dir, 't.npy'), t_cropped)
-            np.save(os.path.join(cropped_exported_dir, 't_received.npy'), t_received_cropped)
-        
-        # Save cropped events
-        if len(cropped_events) > 0:
-            events_xy = cropped_events[:, :2].astype(np.uint16)
-            events_t = cropped_events[:, 2].astype(np.int64)
-            events_p = ((cropped_events[:, 3] + 1) / 2).astype(np.uint8)
-            
-            # Adjust timestamps using the same offset as FLIR frames for proper synchronization
-            # Convert FLIR timestamp offset from seconds to microseconds (events are in microseconds)
-            events_t = events_t - int(flir_timestamp_offset * 1e6)
-            
-            # Ensure no negative timestamps - shift all timestamps if needed
-            if len(events_t) > 0 and events_t.min() < 0:
-                time_shift = -events_t.min()
-                events_t = events_t + time_shift
-                print(f"Shifted event timestamps by {time_shift} us to avoid negative values")
-            
-            # Match original data type for timestamps
-            original_t_path = os.path.join(seq_dir, PROPH_EXPORTED_FOLDER, 'events_t.npy')
-            if os.path.exists(original_t_path):
-                original_t_data = np.load(original_t_path)
-                events_t = events_t.astype(original_t_data.dtype)
-        else:
-            # No events, create empty arrays
-            events_xy = np.array([], dtype=np.uint16).reshape(0, 2)
-            events_t = np.array([], dtype=np.int64)
-            events_p = np.array([], dtype=np.uint8)
-        
-        # Save individual components
-        np.save(os.path.join(cropped_exported_dir, 'events_xy.npy'), events_xy)
-        np.save(os.path.join(cropped_exported_dir, 'events_t.npy'), events_t)
-        np.save(os.path.join(cropped_exported_dir, 'events_p.npy'), events_p)
-        
-        # Save metadata
-        num_frames = crop.end_index - crop.start_index + 1
-        # Get time range from the events themselves
-        if len(cropped_events) > 0:
-            # Events are already adjusted to start from 0
-            adjusted_start_time = 0.0
-            adjusted_end_time = float(events_t[-1] if len(events_t) > 0 else 0.0)
-        else:
-            adjusted_start_time = 0.0
-            adjusted_end_time = 0.0
-        
-        cropped_metadata = {
-            'original_sequence': seq_dir,
-            'crop_name': crop.name,
-            'start_time': adjusted_start_time,  # Adjusted to start at 0
-            'end_time': adjusted_end_time,  # Adjusted duration
-            'start_index': 0,  # Cropped data starts at 0
-            'end_index': num_frames - 1,  # Cropped data ends at num_frames - 1
-            'original_start_index': crop.start_index,  # Keep original indices for reference
-            'original_end_index': crop.end_index,
-            'window_duration_ms': self.window_duration_ms,
-            'num_events': len(cropped_events),
-            'timestamp_offset': flir_timestamp_offset  # Store FLIR timestamp offset for synchronization
-        }
-        with open(os.path.join(cropped_exported_dir, METADATA_FILE), 'w') as f:
-            json.dump(cropped_metadata, f, indent=2)
+        messagebox.showinfo("Save Complete", f"Saved {len(crops_metadata)} crop(s) to crop.json")
+        self.populate_file_browser(self.base_dir)
 
     def on_load_button(self, seq_dir):
         if self.loaded_sequence:
@@ -735,22 +486,22 @@ class CombinedAnnotatorApp:
                 
                 self.data_renderer = DataRenderer(seq_dir, window_size_ms=self.window_duration_ms)
                 
-                # Check metadata for settings  
-                metadata_file = os.path.join(seq_dir, 'metadata.json')
-                if os.path.exists(metadata_file):
-                    with open(metadata_file, 'r') as f:
-                        metadata = json.load(f)
-                        print('Loading metadata...', metadata)
+                # Check crop.json for settings and crops
+                crop_file = os.path.join(seq_dir, 'crop.json')
+                if os.path.exists(crop_file):
+                    with open(crop_file, 'r') as f:
+                        crop_data = json.load(f)
+                        print('Loading crop data...', crop_data)
                         
                         # Load settings
-                        if 'window_duration_ms' in metadata:
-                            self.window_duration_ms = metadata['window_duration_ms']
+                        if 'window_duration_ms' in crop_data:
+                            self.window_duration_ms = crop_data['window_duration_ms']
                             self.data_renderer.window_size_ms = self.window_duration_ms
                             self.data_renderer.window_size_us = self.window_duration_ms * 1000
                         
                         # Load crops
-                        if 'crops' in metadata:
-                            self.crops = [Crop.from_dict(crop_data) for crop_data in metadata['crops']]
+                        if 'crops' in crop_data:
+                            self.crops = [Crop.from_dict(crop) for crop in crop_data['crops']]
                             self.update_crops_display()
                 
                 num_frames = len(self.data_renderer)
@@ -1006,8 +757,8 @@ class CombinedAnnotatorApp:
         
         crop_name = self.crop_name_entry.get().strip()
         if not crop_name:
-            messagebox.showwarning("No Name", "Please enter a name for the crop.")
-            return
+            # Auto-generate name like crop0, crop1, etc.
+            crop_name = f"crop{len(self.crops)}"
         
         # Check for duplicate names
         for crop in self.crops:

@@ -27,6 +27,18 @@ def load_events(sequence_path):
 
 
 def load_frames(sequence_path):
+    """
+    Load the RGB frames from the specified sequence path.
+
+    Returns:
+        A tuple containing the following elements:
+        - flir_frames: A list of RGB frames (as numpy arrays).
+        - flir_t: A numpy array of timestamps for the RGB frames.
+        - res: The resolution of the RGB frames.
+        - K: The camera intrinsics matrix.
+        - dist: The distortion coefficients.
+    """
+
     flir_t = np.load(os.path.join(sequence_path, 'proc', 'flir', 'flir_t.npy'))
     flir_files = sorted(glob.glob(os.path.join(sequence_path, 'proc', 'flir', 'frame', '*.png')))
     # load flir files
@@ -38,6 +50,8 @@ def load_frames(sequence_path):
             print(f"Warning: Could not load PNG file {f}")
             continue
         flir_frames.append(frame)
+    flir_frames = np.stack(flir_frames, axis=0)
+    
     # load metadata
     with open(os.path.join(sequence_path, 'proc', 'flir', 'data.json')) as f:
         flir_metadata = json.load(f)
