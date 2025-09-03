@@ -27,12 +27,9 @@ except ImportError as e:
 
 
 # --- Constants and Configuration ---
-FLIR_DIR = 'flir_23604512'
-PROPH_DIR = 'proph_00051463'
-PROPH_EXP_DIR = 'proph_00051463_exported'
-PROPH_RES = (1280, 720)  # Prophesee resolution
-CROP_ROI = (290, 0, 1010, 720)  # ROI for cropped coordinates
-CROP_RES = (720, 720)
+FLIR_DIR_PREFIX = 'flir_'
+PROPH_DIR_PREFIX = 'proph_'
+PROPH_EXP_DIR_SUFFIX = '_exported'
 
 
 class TimeZeroSource:
@@ -79,7 +76,8 @@ def convert_raw_to_npy(cam_folder):
 
             data = e_pubsub.get(N=-1)
             if data is not None:
-                image = np.full([PROPH_RES[1], PROPH_RES[0]], 0.5, dtype=np.float32)
+                # TODO: don't hardcode this here...
+                image = np.full([720, 1280], 0.5, dtype=np.float32)
                 no_data_count = 0
 
                 et, ex, ey, ep = data
@@ -88,7 +86,7 @@ def convert_raw_to_npy(cam_folder):
                 ey = ey.flatten()
                 ep = ep.flatten()
 
-                ex = (PROPH_RES[0] - 1) - ex
+                ex = (1280 - 1) - ex
 
                 image = events_image(image, ex, ey, ep)
 
@@ -108,15 +106,22 @@ def convert_raw_to_npy(cam_folder):
         stop.value = 1
         camera.join()
 
-def get_calibration_parameters(calib_path, crop):
+def get_calibration_parameters(flir_dir, proph_dir, crop,
+                               proph_crop_res, proph_camera_res):
     """
     Loads calibration parameters. Returns:
     1. A map to warp the FLIR image to the Prophesee perspective.
     2. The intrinsic matrix (K) and distortion coefficients (dist) for the Prophesee camera.
     """
     print("Loading calibration data...")
-    calib_flir_path = os.path.join(calib_path, FLIR_DIR, 'calibration_joint')
-    calib_proph_path = os.path.join(calib_path, PROPH_EXP_DIR.replace('_exported', ''), 'calibration_joint')
+    print("FLIR ", flir_dir)
+    print("PROPH", proph_dir)
+    if crop:
+        print("Using crop Proph resolution", proph_crop_res)
+    else:
+        print("Using full Proph resolution", proph_camera_res)
+    calib_flir_path = os.path.join(flir_dir, 'calibration_joint')
+    calib_proph_path = os.path.join(proph_dir, 'calibration_joint')
 
     loader_cal_flir = Load(calib_flir_path)
     loader_cal_proph = Load(calib_proph_path)
@@ -131,7 +136,8 @@ def get_calibration_parameters(calib_path, crop):
     dist_proph = np.array(calib_data_proph['dist'])
     R_vc_c_proph = np.array(calib_data_proph['R_vc_c']).reshape(3, 3)
 
-    res_proph = CROP_RES if crop else PROPH_RES
+    res_proph = proph_crop_res if crop else proph_camera_res
+    print("Using proph res:", res_proph)
     R_proph_flir = R_vc_c_proph.T @ R_vc_c_flir
 
     # Create map to warp FLIR image to (undistorted) Prophesee coordinates
@@ -148,14 +154,37 @@ class AlignedDataSaver:
         self.crop = crop
         self.crop_idx = crop_idx  # Index of which crop to use from metadata
         self.crop_name = crop_name  # Name of the crop for output directory
-        self.crop_roi = (0, 0, CROP_RES[0], CROP_RES[1]) if self.crop else None # ROI for cropped coordinates
+        # just use the flir times for now,
+        # they've already been synchronized, so this is fine
+        # maybe simplify this in the future
+        self.flir_crop_times = None
 
-        self.flir_camera_dir = os.path.join(self.seq_path, FLIR_DIR)
-        self.proph_events_dir = os.path.join(self.seq_path, PROPH_EXP_DIR)
+        # get the proph and flir ids
+        flir_camera_id = next((d for d in os.listdir(seq_path) if d.startswith(FLIR_DIR_PREFIX)), None)
+        proph_camera_id = next(
+            (d for d in os.listdir(seq_path)
+             if d.startswith(PROPH_DIR_PREFIX) and not d.endswith(PROPH_EXP_DIR_SUFFIX)),
+            None
+        )
 
-        # Load crop metadata if available
-        self.crop_metadata = None
-        self.load_crop_metadata()
+        # set the seq and calib paths
+        self.flir_seq_dir = os.path.join(self.seq_path, flir_camera_id)
+        self.proph_seq_dir = os.path.join(self.seq_path, proph_camera_id+"_exported")
+        self.flir_calib_dir = os.path.join(self.calib_path, flir_camera_id)
+        self.proph_calib_dir = os.path.join(self.calib_path, proph_camera_id)
+
+        # load the crop ROIs for each camera
+        with open(os.path.join(self.flir_calib_dir, "crop.json"), 'r') as f:
+            flir_crop_json = json.load(f)
+            self.flir_crop_roi   = flir_crop_json.get("crop_roi", None)
+            self.flir_crop_res   = flir_crop_json.get("crop_res", None)
+            self.flir_camera_res = flir_crop_json.get("res", None)
+
+        with open(os.path.join(self.proph_calib_dir, "crop.json"), 'r') as f:
+            proph_crop_json = json.load(f)
+            self.proph_crop_roi   = proph_crop_json.get("crop_roi", None)
+            self.proph_crop_res   = proph_crop_json.get("crop_res", None)
+            self.proph_camera_res = proph_crop_json.get("res", None)
 
         # Set output directories based on whether we're processing a specific crop
         if self.crop_name:
@@ -174,50 +203,57 @@ class AlignedDataSaver:
 
         self.process_and_save()
     
-    def load_crop_metadata(self):
-        """Load crop metadata from crop.json file if available"""
-        # Try loading from crop.json in the sequence root
-        crop_json_path = os.path.join(self.seq_path, "crop.json")
-        if os.path.exists(crop_json_path):
-            with open(crop_json_path, 'r') as f:
-                crop_data = json.load(f)
-                if 'crops' in crop_data:
-                    crops = crop_data['crops']
-                    if crops and self.crop_idx is not None:
-                        # Use specified crop index
-                        idx = self.crop_idx
-                        if idx < len(crops):
-                            self.crop_metadata = crops[idx]
-                            print(f"Loaded crop metadata: {self.crop_metadata.get('name', f'crop_{idx}')}")
-                            print(f"  Frames: {self.crop_metadata['start_index']} to {self.crop_metadata['end_index']}")
-                            if 'flir_start_time' in self.crop_metadata:
-                                print(f"  FLIR time: {self.crop_metadata['flir_start_time']:.6f} to {self.crop_metadata['flir_end_time']:.6f}")
-                            if 'event_start_time' in self.crop_metadata:
-                                print(f"  Event time: {self.crop_metadata['event_start_time']:.6f} to {self.crop_metadata['event_end_time']:.6f}")
-                        else:
-                            print(f"Warning: Crop index {idx} out of range (found {len(crops)} crops)")
-                    print(f"Successfully loaded {len(crops)} crops from crop.json")
+    def load_flir_crop_times(self, flir_t_shift):
+        """Load crop metadata from crops.json file if available"""
+        # Try loading from crops.json in the sequence root
+        crops_json_path = os.path.join(self.seq_path, "crops.json")
+        if os.path.exists(crops_json_path):
+            with open(crops_json_path, 'r') as f:
+                crops = json.load(f)
+                if crops and self.crop_idx is not None:
+                    # Use specified crop index
+                    idx = self.crop_idx
+                    if idx < len(crops):
+                        self.flir_crop_times = crops[idx]
+                        # adjust the crop times based on the flir_t_shift
+                        self.flir_crop_times['flir_start_time'] = (self.flir_crop_times['flir_start_time'] + flir_t_shift) * 1e6
+                        self.flir_crop_times['flir_end_time'] = (self.flir_crop_times['flir_end_time'] + flir_t_shift) * 1e6
+                        # set the proph_start_time and proph_end_time to the same as the flir ones for now
+                        self.flir_crop_times['proph_start_time'] = self.flir_crop_times['flir_start_time']
+                        self.flir_crop_times['proph_end_time'] = self.flir_crop_times['flir_end_time']
+                        print(f"Loaded crop metadata: {self.flir_crop_times.get('name', f'crop_{idx}')}")
+                        if 'flir_start_time' in self.flir_crop_times:
+                            print(f"  FLIR time: {self.flir_crop_times['flir_start_time']:.6f} to {self.flir_crop_times['flir_end_time']:.6f}")
+                        if 'proph_start_time' in self.flir_crop_times:
+                            print(f"  Event time: {self.flir_crop_times['proph_start_time']:.6f} to {self.flir_crop_times['proph_end_time']:.6f}")
+                    else:
+                        print(f"Warning: Crop index {idx} out of range (found {len(crops)} crops)")
+                print(f"Successfully loaded {len(crops)} crops from crop.json")
 
     def process_and_save(self):
         print(f"Starting data processing for sequence: {self.seq_path}")
 
         # 1. Get calibration parameters
-        flir_map1, flir_map2, K_proph, dist_proph, K_flir, dist_flir = get_calibration_parameters(self.calib_path, self.crop)
+        flir_map1, flir_map2, K_proph, dist_proph, K_flir, dist_flir = get_calibration_parameters(self.flir_calib_dir, self.proph_calib_dir, self.crop,
+                                                                                                  self.proph_crop_res, self.proph_camera_res)
 
         # 2. Load Data Streams & Synchronize
-        loader_frame = Load(self.flir_camera_dir)
-        loader_event = LoadEventStream(self.proph_events_dir)
+        print("Loading sequence data...")
+        print("FLIR", self.flir_seq_dir)
+        print("Proph", self.proph_seq_dir)
+        loader_frame = Load(self.flir_seq_dir)
+        loader_event = LoadEventStream(self.proph_seq_dir)
         print("Performing time synchronization...")
         Load.time_synchronization(loader_frame, loader_event)
 
-        flir_data_file = os.path.join(self.flir_camera_dir, "data.json")
+        flir_data_file = os.path.join(self.flir_seq_dir, "data.json")
         with open(flir_data_file, "r+") as f:
             flir_data = json.load(f)
         # add K_flir and dist_flir
         flir_data["append_fields"]["K"] = K_flir.tolist()
         flir_data["append_fields"]["dist"] = dist_flir.tolist()
 
-        flir_t_file = os.path.join(self.flir_camera_dir, 't.npy')
+        flir_t_file = os.path.join(self.flir_seq_dir, 't.npy')
         if os.path.exists(flir_t_file):
             flir_t = np.load(flir_t_file)
             print(f"Found FLIR timestamps: {flir_t.shape}")
@@ -225,10 +261,13 @@ class AlignedDataSaver:
         flir_t_shift = -flir_t[0]
         flir_t = (flir_t + flir_t_shift) * 1e6
 
+        # load crop metadata if available
+        self.load_flir_crop_times(flir_t_shift)
+
         frame_names = loader_frame.get_all()['frame']
         print(f"Loaded {len(frame_names)} frame names and {len(flir_t)} timestamps")
 
-        event_data_file = os.path.join(self.proph_events_dir, "data.json")
+        event_data_file = os.path.join(self.proph_seq_dir, "data.json")
         with open(event_data_file, "r+") as f:
             event_data = json.load(f)
         event_t = loader_event.get_appended()['events_t']
@@ -237,16 +276,16 @@ class AlignedDataSaver:
         # TODO: maybe we can avoid using the vme driver for raw to npy conversion
         #       and just use metavision_sdk directly
         # TODO: move the cropping ROI information to one place
-        event_xy[:, 0] = (PROPH_RES[0] - 1) - event_xy[:, 0]
+        event_xy[:, 0] = (self.proph_camera_res[0] - 1) - event_xy[:, 0]
         if self.crop:
-            roi = CROP_ROI
+            print("Cropping events to", self.proph_crop_roi)
             event_xy = event_xy.astype(np.int32)
-            event_xy[:, 0] = np.maximum(event_xy[:, 0] - roi[0], 0)
-            event_xy[:, 1] = np.maximum(event_xy[:, 1] - roi[1], 0)
+            event_xy[:, 0] = np.maximum(event_xy[:, 0] - self.proph_crop_roi[0], 0)
+            event_xy[:, 1] = np.maximum(event_xy[:, 1] - self.proph_crop_roi[1], 0)
             event_xy = event_xy.astype(np.uint16)
             # update resolution in data.json file
-            event_data["append_fields"]["res"] = list(CROP_RES)
-            flir_data["append_fields"]["res"] = list(CROP_RES)
+            event_data["append_fields"]["res"] = list(self.proph_crop_res)
+            flir_data["append_fields"]["res"] = list(self.proph_crop_res) # FLIR gets warped to event coordinates and size
 
         # Find the first flir_t that is above the first event_t (do this before cropping)
         first_event_t = event_t[0] if len(event_t) > 0 else 0
@@ -254,45 +293,39 @@ class AlignedDataSaver:
         print(f"First FLIR index above first event timestamp: {first_flir_idx}")
 
         # Apply crop metadata if available
-        if self.crop_metadata:
-            # Crop frame names based on metadata indices
-            start_idx = self.crop_metadata['start_index']
-            end_idx = self.crop_metadata['end_index'] + 1  # +1 because end is inclusive
-            
-            # Ensure indices are within bounds
-            start_idx = max(0, min(start_idx, len(frame_names) - 1))
-            end_idx = max(start_idx + 1, min(end_idx, len(frame_names)))
-            
+        if self.flir_crop_times:
+            # find start and end index closest to the flir timestamps
+            start_idx = np.searchsorted(flir_t, self.flir_crop_times['flir_start_time'], side='left')
+            end_idx = np.searchsorted(flir_t, self.flir_crop_times['flir_end_time'], side='right')
+
+            print("MIN and MAX", np.min(flir_t), np.max(flir_t))
+            print("Start index:", self.flir_crop_times['flir_start_time'], start_idx)
+            print("End index:", self.flir_crop_times['flir_end_time'], end_idx)
+
             # Apply cropping to frame names and timestamps
             # Note: frame_names and flir_t should have the same length initially
             frame_names = frame_names[start_idx:end_idx]
             flir_t = flir_t[start_idx:end_idx]
             
-            # Crop events based on time range if available, otherwise use frame-based estimation
-            if 'event_start_time' in self.crop_metadata and 'event_end_time' in self.crop_metadata:
-                # Use explicit event times if available
-                # Convert from seconds (in crop.json) to microseconds (event_t units)
-                event_start_time = self.crop_metadata['event_start_time'] * 1e6
-                event_end_time = self.crop_metadata['event_end_time'] * 1e6
-            elif len(flir_t) > 0:
-                # Estimate event times based on FLIR timestamps
-                event_start_time = flir_t[0] if len(flir_t) > 0 else event_t[0]
-                event_end_time = flir_t[-1] if len(flir_t) > 0 else event_t[-1]
+            # Crop events based on time range if available
+            if 'proph_start_time' in self.flir_crop_times and 'proph_end_time' in self.flir_crop_times:
+                proph_start_time = self.flir_crop_times['proph_start_time']
+                proph_end_time = self.flir_crop_times['proph_end_time']
             else:
                 # Fall back to using all events
-                event_start_time = event_t[0]
-                event_end_time = event_t[-1]
+                proph_start_time = event_t[0]
+                proph_end_time = event_t[-1]
             
             # Find indices for event cropping
-            event_start_idx = np.searchsorted(event_t, event_start_time, side='left')
-            event_end_idx = np.searchsorted(event_t, event_end_time, side='right')
+            event_start_idx = np.searchsorted(event_t, proph_start_time, side='left')
+            event_end_idx = np.searchsorted(event_t, proph_end_time, side='right')
             
             # Crop event data
             event_t = event_t[event_start_idx:event_end_idx]
             event_xy = event_xy[event_start_idx:event_end_idx]
             event_p = event_p[event_start_idx:event_end_idx]
             
-            print(f"Applied crop '{self.crop_metadata.get('name', f'crop_{self.crop_idx}')}':")
+            print(f"Applied crop '{self.flir_crop_times.get('name', f'crop_{self.crop_idx}')}':")
             print(f"  Frames: {len(frame_names)} (from {start_idx} to {end_idx})")
             print(f"  FLIR timestamps: {len(flir_t)}")
             print(f"  Events: {len(event_t)} (from {event_start_idx} to {event_end_idx})")
@@ -302,8 +335,8 @@ class AlignedDataSaver:
                 print(f"WARNING: flir_t length ({len(flir_t)}) doesn't match frame_names length ({len(frame_names)})")
             
             # Update data.json with crop info
-            flir_data["crop_applied"] = self.crop_metadata
-            event_data["crop_applied"] = self.crop_metadata
+            flir_data["crop_applied"] = self.flir_crop_times
+            event_data["crop_applied"] = self.flir_crop_times
         else:
             # Adjust frame_names and timestamps based on first_flir_idx as before
             frame_names = frame_names[first_flir_idx:]
@@ -315,8 +348,8 @@ class AlignedDataSaver:
         np.save(os.path.join(self.output_events_dir, "events_p.npy"), event_p)
         
         # Save data.json files
-        event_data["append_fields"]["K"] = K_flir.tolist()
-        event_data["append_fields"]["dist"] = dist_flir.tolist()
+        event_data["append_fields"]["K"] = K_proph.tolist()
+        event_data["append_fields"]["dist"] = dist_proph.tolist()
         with open(os.path.join(self.output_events_dir, "data.json"), "w") as f:
             json.dump(event_data, f)
         
@@ -334,13 +367,13 @@ class AlignedDataSaver:
         file_idx = 0
         for i in tqdm.tqdm(range(len(frame_names))):
             # --- Rectify FLIR Frame ---
-            frame_path = os.path.join(self.flir_camera_dir, frame_names[i])
+            frame_path = os.path.join(self.flir_seq_dir, frame_names[i])
             if not os.path.exists(frame_path): continue
             frame_rgb = np.load(frame_path)
             
             # Apply zero rectangles if specified in crop metadata
-            if self.crop_metadata and 'zero_rectangles' in self.crop_metadata:
-                for rect in self.crop_metadata['zero_rectangles']:
+            if self.flir_crop_times and 'zero_rectangles' in self.flir_crop_times:
+                for rect in self.flir_crop_times['zero_rectangles']:
                     x, y, w, h = rect
                     # Ensure rectangle is within bounds
                     x_start = max(0, x)
@@ -375,14 +408,19 @@ def validate_sequence_with_proc_dir(sequence, proc_dir_name="proc"):
     event_K = np.array(event_data["append_fields"]["K"]).reshape(3, 3)
     event_dist = np.array(event_data["append_fields"]["dist"])
 
+    # TODO: validate that the right K and dist matrices were copied over
+    # TODO: copy over the new flir frame filenames, they are .png now and temporally aligned
+
     # Validate FLIR data
     flir_frames = sorted(glob.glob(os.path.join(sequence, proc_dir_name, "flir", "frame", "*.png")))
     # check if frames exist
-    if not flir_frames:
+    if not flir_frames: 
         raise ValueError(f"No FLIR frames found in {os.path.join(sequence, proc_dir_name, 'flir', 'frame')}")
     for frame in flir_frames:
         # check resolution
         frame_res = cv2.imread(frame).shape[:2]
+        # flip the flir_res (from h,w to w,h)
+        frame_res = frame_res[::-1]
         if not np.array_equal(frame_res, flir_res):
             print(f"Warning: FLIR frame {frame} has resolution {frame_res} but expected {flir_res}")
 
@@ -399,7 +437,7 @@ def validate_sequence_with_proc_dir(sequence, proc_dir_name="proc"):
         raise ValueError(f"events_xy coordinates {event_xy} are negative")
     # check if events_xy are within the bounds of the resolution
     if not np.all(event_xy[:, 0] < event_res[0]) or not np.all(event_xy[:, 1] < event_res[1]):
-        raise ValueError(f"events_xy coordinates {event_xy} are out of bounds for resolution {event_res}")
+        raise ValueError(f"events_xy coordinates {np.min(event_xy[:, 0]), np.min(event_xy[:, 1]), np.max(event_xy[:, 0]), np.max(event_xy[:, 1])} are out of bounds for resolution {event_res}")
 
 
 def validate_sequence(sequence):
@@ -408,14 +446,12 @@ def validate_sequence(sequence):
 
 
 def get_crops_from_sequence(sequence):
-    """Get all crops from a sequence's crop.json file"""
-    crop_json_path = os.path.join(sequence, "crop.json")
+    """Get all crops from a sequence's crops.json file"""
+    crop_json_path = os.path.join(sequence, "crops.json")
     if os.path.exists(crop_json_path):
         with open(crop_json_path, 'r') as f:
-            crop_data = json.load(f)
-            if 'crops' in crop_data:
-                return crop_data['crops']
-    return None
+            crops = json.load(f)
+    return crops
 
 
 def move_proc_folders_to_dataset(sequence_path, dataset_procs_dir, process_all_crops=False, crop_idx=None):
@@ -496,12 +532,17 @@ def process_sequence(sequence, calib, beamsplitter, only_validate=False, crop_id
             validate_sequence(sequence)
         return
     
-    # only convert if the "proph_00051463_exported" does not exist
-    if not os.path.exists(os.path.join(sequence, PROPH_EXP_DIR)):
+    # only convert if any folder ending with the suffix does not exist
+    if not any(d.endswith(PROPH_EXP_DIR_SUFFIX) for d in os.listdir(sequence)):
         print('Converting', sequence)
-        convert_raw_to_npy(os.path.join(sequence, PROPH_DIR))
+        # find the proph_dir with the prefix
+        proph_dir = next((d for d in os.listdir(sequence) if d.startswith(PROPH_DIR_PREFIX)), None)
+        if proph_dir is None:
+            print('No valid proph_dir found, skipping conversion:', sequence)
+            return
+        convert_raw_to_npy(os.path.join(sequence, proph_dir))
     else:
-        print('Skipping conversion, already exists:', os.path.join(sequence, PROPH_EXP_DIR))
+        print('Skipping conversion, already exists:', sequence)
 
     # Check if we should process all crops
     if process_all_crops:

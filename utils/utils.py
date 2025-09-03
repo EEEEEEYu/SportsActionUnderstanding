@@ -8,19 +8,17 @@ from numba import jit
 from scipy.spatial import cKDTree
 
 
-CROP_RES = (720, 720)
-
-
 def load_events(sequence_path):
     # load events
     events_xy = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_xy.npy')).astype(np.uint16)
+    print('Events XY', np.min(events_xy), np.max(events_xy), events_xy.dtype, events_xy.shape)
     events_t  = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_t.npy')).astype(np.int64)
     events_p  = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_p.npy')).astype(np.uint8)
     events = np.concatenate([events_xy, events_t[..., np.newaxis], events_p[..., np.newaxis]], axis=-1)
     # load metadata
     with open(os.path.join(sequence_path, 'proc', 'events', 'data.json')) as f:
         events_metadata = json.load(f)
-        res = events_metadata['append_fields']['res']
+        res = events_metadata['append_fields']['res'] # this is the cropped resolution
         K = np.array(events_metadata['append_fields']['K']).reshape(3, 3)
         dist = np.array(events_metadata['append_fields']['dist'])
     return events, events_t, res, K, dist
@@ -63,7 +61,7 @@ def load_frames(sequence_path):
 
 
 def render(events, events_res):
-    image = np.zeros((events_res[0], events_res[1], 3), dtype=np.uint8)
+    image = np.zeros((events_res[1], events_res[0], 3), dtype=np.uint8)
     if len(events) == 0:
         return image
     x,y,p = events[:,0].astype(np.int32), events[:,1].astype(np.int32), events[:,3] > 0
@@ -111,12 +109,12 @@ def event_count_image(image, x, y, p):
 
 # for more about the challenges with warping event points, see this issue here:
 # https://github.com/uzh-rpg/DSEC/issues/14#issuecomment-841348958
-def undistort_event_count_image(event_count_image, K, dist, res=CROP_RES):
-    h, w = res
+def undistort_event_count_image(event_count_image, K, dist, res):
+    w,h = res
     map1, map2 = cv2.initUndistortRectifyMap(K, dist, None, K, (w, h), cv2.CV_32FC1)
     return cv2.remap(event_count_image, map1, map2, cv2.INTER_LINEAR)
 
-def undistort_events_forward(events, K, dist, round=False, res=CROP_RES):
+def undistort_events_forward(events, K, dist, res, round=False):
     # Format points for OpenCV function: (N, 1, 2)
     points_to_undistort = np.stack((events[:, 0], events[:, 1]), axis=-1).astype(np.float32)[:, np.newaxis, :]
     # Undistort points. The new camera matrix P=K gives pixel coordinates.
@@ -130,7 +128,7 @@ def undistort_events_forward(events, K, dist, round=False, res=CROP_RES):
     events[:, :2] = rectified_coords
     return events
 
-def undistort_events_backward(events, K, dist, res=CROP_RES):
+def undistort_events_backward(events, K, dist, res):
     # h, w: Sensor height and width (e.g., 720, 720)
     h, w = res
 

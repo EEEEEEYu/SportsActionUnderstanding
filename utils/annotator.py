@@ -7,21 +7,14 @@ Coordinate Systems:
 - No scaling needed as we're working with full resolution images
 """
 
-# TODO: save the crop info to crops.json (don't add it to data.json anymore)
-#       save name as well into this file
-# TODO: update convert_raw.py to read in crops.json and use it when saving
-# TODO: update viewer.py to take in right arrow key presses as crop start markers,
-#       left arrow key presses as crop end markers,
-#       and save out a crop.json file for it
-
 import os
 import threading
 import multiprocessing
 import argparse
 import cv2
 import json
+import glob
 import numpy as np
-import shutil
 from tkinter import Tk, Label, Scale, HORIZONTAL, Frame, Button, Entry, END, Listbox, Scrollbar, messagebox, StringVar, Checkbutton, BooleanVar, ttk, filedialog
 from PIL import Image, ImageTk
 
@@ -30,13 +23,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import utils
 
 
-# binoc
-PROPH_DIR = 'proph_00051463'
-PROPH_EXPORTED_FOLDER = 'proph_00051463_exported'
+# --- Constants and Configuration ---
 METADATA_FILE = 'metadata.json'
-
-# For image data
-FLIR_DIR = 'flir_23604512'
 
 
 class DataRenderer:
@@ -378,11 +366,12 @@ class CombinedAnnotatorApp:
                     self.file_listbox.itemconfig(END, {'fg': 'orange'})
 
                     # Check if exported folder exists
-                    proph_exported = os.path.join(fullpath, PROPH_EXPORTED_FOLDER)
-                    if not os.path.exists(proph_exported):
+                    # find the folder that matches the pattern: proph_*_exported
+                    proph_exported = glob.glob(os.path.join(fullpath, "proph_*_exported"))
+                    if not proph_exported:
                         self.file_listbox.itemconfig(END, {'fg': 'red'})
                     else:
-                        if os.path.exists(os.path.join(proph_exported, METADATA_FILE)):
+                        if os.path.exists(os.path.join(proph_exported[0], METADATA_FILE)):
                             self.file_listbox.itemconfig(END, {'fg': 'black'})
 
     def on_folder_select(self, event):

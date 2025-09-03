@@ -3,7 +3,7 @@ import os
 import cv2
 import numpy as np
 
-from .utils import load_frames, load_events, get_events_between, get_frame_between, render, undistort_event_count_image
+from utils import load_frames, load_events, get_events_between, get_frame_between, render, undistort_event_count_image
 
 
 def view_processed_data(sequence_path, window_size_ms=100):
@@ -53,7 +53,10 @@ def view_processed_data(sequence_path, window_size_ms=100):
 
         # get flir frame
         flir_frame = get_frame_between(frames, flir_t, window_start, window_end)
-        
+
+        print(f"FLIR frame shape: {flir_frame.shape}")
+        print(f"Event frame shape: {event_frame.shape}")
+
         # --- Create visualizations ---
         # Create an overlay by blending the two images
         overlay = cv2.addWeighted(flir_frame, 0.6, event_frame, 0.8, 0)
