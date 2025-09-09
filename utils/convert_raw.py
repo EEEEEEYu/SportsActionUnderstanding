@@ -81,11 +81,14 @@ def convert_raw_to_npy(cam_folder):
                 no_data_count = 0
 
                 et, ex, ey, ep = data
+                print("RAW EVENTS", ex.min(), ex.max(), ey.min(), ey.max())
+                # >> RAW EVENTS 310 1279 0 679
                 et = et.flatten()
                 ex = ex.flatten()
                 ey = ey.flatten()
                 ep = ep.flatten()
 
+                # flip horizontally
                 ex = (1280 - 1) - ex
 
                 image = events_image(image, ex, ey, ep)
@@ -276,16 +279,27 @@ class AlignedDataSaver:
         # TODO: maybe we can avoid using the vme driver for raw to npy conversion
         #       and just use metavision_sdk directly
         # TODO: move the cropping ROI information to one place
-        event_xy[:, 0] = (self.proph_camera_res[0] - 1) - event_xy[:, 0]
+        print('BEFORE FLIP', event_xy[:,0].min(), event_xy[:,0].max())
+        # >> BEFORE FLIP 310 1279
+        # shift x to 0
+        print(event_xy[:,0].min(), event_xy[:,0].max())
+        # >> 0 969
         if self.crop:
             print("Cropping events to", self.proph_crop_roi)
+            crop_width = self.proph_crop_roi[2] - self.proph_crop_roi[0]
             event_xy = event_xy.astype(np.int32)
             event_xy[:, 0] = np.maximum(event_xy[:, 0] - self.proph_crop_roi[0], 0)
             event_xy[:, 1] = np.maximum(event_xy[:, 1] - self.proph_crop_roi[1], 0)
             event_xy = event_xy.astype(np.uint16)
+            # flip horizontally
+            event_xy[:, 0] = (crop_width-1) - event_xy[:, 0]
             # update resolution in data.json file
             event_data["append_fields"]["res"] = list(self.proph_crop_res)
             flir_data["append_fields"]["res"] = list(self.proph_crop_res) # FLIR gets warped to event coordinates and size
+        else:
+            # flip horizontally
+            full_width = self.proph_camera_res[0]
+            event_xy[:, 0] = (full_width - 1) - event_xy[:, 0]
 
         # Find the first flir_t that is above the first event_t (do this before cropping)
         first_event_t = event_t[0] if len(event_t) > 0 else 0

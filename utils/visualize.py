@@ -14,7 +14,8 @@ def view_processed_data(sequence_path, window_size_ms=100):
     # load events
     events, events_t, events_res, events_K, events_dist = load_events(sequence_path)
     print(f'raw events shape: {events.shape}')
-    print(f'raw events x min: {events[:, 0].min()} max: {events[:, 1].max()} y min: {events[:, 0].min()} max: {events[:, 1].max()}')
+    print("events res", events_res)
+    print(f'raw events x min: {events[:, 0].min()} max: {events[:, 0].max()} y min: {events[:, 1].min()} max: {events[:, 1].max()}')
 
     # FORWARD POINT MAPPING
     #events = utils.undistort_events_forward(events, events_K, events_dist, round=True, res=events_res)

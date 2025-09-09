@@ -11,7 +11,6 @@ from scipy.spatial import cKDTree
 def load_events(sequence_path):
     # load events
     events_xy = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_xy.npy')).astype(np.uint16)
-    print('Events XY', np.min(events_xy), np.max(events_xy), events_xy.dtype, events_xy.shape)
     events_t  = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_t.npy')).astype(np.int64)
     events_p  = np.load(os.path.join(sequence_path, 'proc', 'events', 'events_p.npy')).astype(np.uint8)
     events = np.concatenate([events_xy, events_t[..., np.newaxis], events_p[..., np.newaxis]], axis=-1)
