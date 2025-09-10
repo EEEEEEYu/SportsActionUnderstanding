@@ -81,7 +81,7 @@ def convert_raw_to_npy(cam_folder):
                 no_data_count = 0
 
                 et, ex, ey, ep = data
-                print("RAW EVENTS", ex.min(), ex.max(), ey.min(), ey.max())
+                #print("RAW EVENTS", ex.min(), ex.max(), ey.min(), ey.max())
                 # >> RAW EVENTS 310 1279 0 679
                 et = et.flatten()
                 ex = ex.flatten()
@@ -273,9 +273,9 @@ class AlignedDataSaver:
         event_data_file = os.path.join(self.proph_seq_dir, "data.json")
         with open(event_data_file, "r+") as f:
             event_data = json.load(f)
-        event_t = loader_event.get_appended()['events_t']
+        event_t  = loader_event.get_appended()['events_t']
         event_xy = loader_event.get_appended()['events_xy']
-        event_p = loader_event.get_appended()['events_p']
+        event_p  = loader_event.get_appended()['events_p']
         # TODO: maybe we can avoid using the vme driver for raw to npy conversion
         #       and just use metavision_sdk directly
         # TODO: move the cropping ROI information to one place
@@ -284,22 +284,42 @@ class AlignedDataSaver:
         # shift x to 0
         print(event_xy[:,0].min(), event_xy[:,0].max())
         # >> 0 969
+
+        full_width = self.proph_camera_res[0]
+        event_xy[:, 0] = (full_width - 1) - event_xy[:, 0]
         if self.crop:
             print("Cropping events to", self.proph_crop_roi)
-            crop_width = self.proph_crop_roi[2] - self.proph_crop_roi[0]
+            crop_width  = self.proph_crop_roi[2] - self.proph_crop_roi[0]
+            crop_height = self.proph_crop_roi[3] - self.proph_crop_roi[1]
+            
+            # print old ROI 
+            print("ORIGINAL ROI:", self.proph_crop_roi)
+
+            # flip the crop horizontally as well
+            old_crop_x0 = self.proph_crop_roi[0]
+            old_crop_x1 = self.proph_crop_roi[2]
+            new_crop_x0 = full_width - self.proph_crop_roi[2]
+            new_crop_x1 = full_width - self.proph_crop_roi[0]
+            self.proph_crop_roi[0] = new_crop_x0
+            self.proph_crop_roi[2] = new_crop_x1
+
+            # print the new ROI
+            print("FLIPPED ROI:", self.proph_crop_roi)
+
             event_xy = event_xy.astype(np.int32)
-            event_xy[:, 0] = np.maximum(event_xy[:, 0] - self.proph_crop_roi[0], 0)
-            event_xy[:, 1] = np.maximum(event_xy[:, 1] - self.proph_crop_roi[1], 0)
+            # shift x and y to start at 0
+            # shift by the flipped proph_crop_roi[0] because we flipped the image horizontally
+            #event_xy[:, 0] = (full_width - 1) - (event_xy[:, 0] + self.proph_crop_roi[0])
+            event_xy[:, 0] = event_xy[:, 0] - old_crop_x0
+            # set any negative values to 0
+            event_xy[:, 0] = np.clip(event_xy[:, 0], 0, crop_width-1)
+            event_xy[:, 1] = event_xy[:, 1] - self.proph_crop_roi[1]
+            assert event_xy[:, 0].min() == 0 and event_xy[:, 0].max() == crop_width-1, f"Event x out of bounds after crop: {event_xy[:, 0].min()} to {event_xy[:, 0].max()} vs crop width {crop_width}"
+            assert event_xy[:, 1].min() == 0 and event_xy[:, 1].max() == crop_height-1, f"Event y out of bounds after crop: {event_xy[:, 1].min()} to {event_xy[:, 1].max()} vs crop height {crop_height}"
             event_xy = event_xy.astype(np.uint16)
-            # flip horizontally
-            event_xy[:, 0] = (crop_width-1) - event_xy[:, 0]
             # update resolution in data.json file
             event_data["append_fields"]["res"] = list(self.proph_crop_res)
             flir_data["append_fields"]["res"] = list(self.proph_crop_res) # FLIR gets warped to event coordinates and size
-        else:
-            # flip horizontally
-            full_width = self.proph_camera_res[0]
-            event_xy[:, 0] = (full_width - 1) - event_xy[:, 0]
 
         # Find the first flir_t that is above the first event_t (do this before cropping)
         first_event_t = event_t[0] if len(event_t) > 0 else 0

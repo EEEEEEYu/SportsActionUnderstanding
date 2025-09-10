@@ -12,27 +12,27 @@ strategy: auto
 
 ##################### Dataset Setting #####################
 dataset_class_name: event_voxel
-dataset_dir: '/fs/nexus-scratch/haowenyu/SportsActionUnderstanding/ActionData'
+dataset_dir: '/home/matt/projects/vme_research/calibrate/calibrate_data_2025_09_09_data/procs'
 split_ratios: [0.8, 0.1, 0.1]
 batch_size: 2
 test_batch_size: 2
 num_workers: 2
 persistent_workers: True
-height: 720
-width: 720
-downsample_ratio: 2.0 # Original resolution of events are 720 x 720. model_input_size * downsample_ratio = original_size
+height: 680
+width: 680
+downsample_ratio: 2.0 # Original resolution of events are 680 x 680. model_input_size * downsample_ratio = original_size
 num_bins: 5
 use_polarity: True # If use polarity, the final channels will be doubled
 accumulation_interval_ms: 150
 use_cache: True
-cache_root: '/fs/nexus-scratch/haowenyu/ActionDataCache'
+cache_root: '/home/matt/DATA/data_cache'
 
 ##################### Model Architecture #####################
 model_class_name: vivit
 num_classes: 16
 in_channels: 10
-image_size: 360
-tubelet_size: [1, 18, 18]  # temporal=1 → per-frame outputs
+image_size: 340
+tubelet_size: [1, 20, 20]  # temporal=1 → per-frame outputs
 hidden_size: 384           # lighter than default
 num_layers: 4
 num_heads: 8
